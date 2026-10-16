@@ -1,34 +1,23 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Administration INOX PRÉSENCE
 
-## Getting Started
+Panel Next.js de l'administration. L'authentification exige un compte invité, un mot de passe et un facteur TOTP validé (`aal2`). Les rôles et l'état actif proviennent des `app_metadata` Supabase, contrôlées sur le serveur à chaque accès sensible.
 
-First, run the development server:
+## Frontière de sécurité
+
+Le navigateur ne reçoit que l'URL et la clé publiable Supabase. La clé secrète est utilisée uniquement dans les routes serveur pour les invitations. Le panel ne doit pas accéder directement aux tables métier de pointage ni à Redis : ces opérations appartiennent à `pointage-api`.
+
+La création d'un membre passe par une invitation émise par un propriétaire ou un administrateur authentifié en `aal2`. Le QR d'invitation contient un lien à jeton haché ; `/auth/confirm` vérifie le jeton côté serveur et établit la session dans les cookies avant l'activation TOTP. Ce QR n'est pas le secret TOTP personnel de l'invité.
+
+## Mise en route
+
+Configurer `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY` et `SUPABASE_SECRET_KEY` dans l'environnement serveur. Ne jamais préfixer la clé secrète avec `NEXT_PUBLIC_` ni la committer.
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm ci
+npm run lint
+npm run build
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+En production, configurer l'URL du site Supabase Auth sur l'origine du panel et interdire les inscriptions publiques. La protection contre les mots de passe compromis dépend du forfait Supabase ; à défaut, imposer au moins 12 caractères et conserver le TOTP obligatoire.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Le tableau de bord métier et l'API de pointage ne sont pas encore opérationnels. Ne pas mettre le système en service pour la présence réelle sur la seule base d'un déploiement Vercel `READY`.
