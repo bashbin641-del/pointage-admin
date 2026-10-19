@@ -7,6 +7,8 @@ import { createClient } from "@/lib/supabase/client";
 
 type Enrollment = { factorId: string; qrCode: string; secret: string };
 
+const TOTP_DISPLAY_NAME = "INOX.techs Pointage admin";
+
 export default function MfaEnrollment({
   email,
   requiresPassword,
@@ -44,8 +46,8 @@ export default function MfaEnrollment({
 
       const { data, error: enrollError } = await supabase.auth.mfa.enroll({
         factorType: "totp",
-        friendlyName: "INOX Présence",
-        issuer: "INOX Technologies",
+        friendlyName: TOTP_DISPLAY_NAME,
+        issuer: TOTP_DISPLAY_NAME,
       });
       if (enrollError) throw enrollError;
       setEnrollment({ factorId: data.id, qrCode: data.totp.qr_code, secret: data.totp.secret });
@@ -94,7 +96,7 @@ export default function MfaEnrollment({
 
   return (
     <form className="auth-form" onSubmit={verify}>
-      <div className="enrollment-qr"><Image src={enrollment.qrCode} alt="QR TOTP personnel INOX" width={220} height={220} unoptimized priority /></div>
+      <div className="enrollment-qr"><Image src={enrollment.qrCode} alt={`QR TOTP personnel ${TOTP_DISPLAY_NAME}`} width={220} height={220} unoptimized priority /></div>
       <p className="auth-help">Scannez ce QR dans Google Authenticator, Microsoft Authenticator ou 1Password. Il s’agit de votre secret personnel, jamais du QR d’invitation.</p>
       <details><summary>Afficher la clé manuelle</summary><code>{enrollment.secret}</code></details>
       <label>Code TOTP<input className="otp-input" inputMode="numeric" pattern="[0-9]{6}" maxLength={6} required value={code} onChange={(event) => setCode(event.target.value.replace(/\D/g, ""))} placeholder="000000" /></label>
