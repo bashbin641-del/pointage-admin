@@ -5,7 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 function apiUrl() {
   const value = process.env.NEXT_PUBLIC_API_URL?.trim().replace(/\/$/, "");
   if (!value) throw new Error("API_URL_MISSING");
-  return value;
+  return value.endsWith("/api/v1") ? value : `${value}/api/v1`;
 }
 
 export async function coreApi(path: string, init: RequestInit = {}) {
@@ -16,7 +16,7 @@ export async function coreApi(path: string, init: RequestInit = {}) {
   const headers = new Headers(init.headers);
   headers.set("Authorization", `Bearer ${token}`);
   if (init.body && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
-  return fetch(`${apiUrl()}/api/v1/${path.replace(/^\//, "")}`, {
+  return fetch(`${apiUrl()}/${path.replace(/^\//, "")}`, {
     ...init,
     headers,
     cache: "no-store",
