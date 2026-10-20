@@ -1,6 +1,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import type { ReactNode } from "react";
+import AdminNavLink from "@/components/admin-nav-link";
 import type { AdminIdentity } from "@/lib/auth/types";
 
 const links = [
@@ -14,12 +15,12 @@ export default function AdminShell({ identity, activePath, title, children }: { 
   return (
     <main className="admin-shell">
       <aside>
-        <Link className="brand" href="/" aria-label="INOX Présence — Tableau de bord">
+        <Link className="brand" href="/" prefetch={true} aria-label="INOX Présence — Tableau de bord">
           <Image src="/brand/inox-logo.png" alt="INOX Technologies" width={92} height={65} priority />
           <span>INOX<br />PRÉSENCE</span>
         </Link>
         <nav aria-label="Navigation principale">
-          {links.map((link) => <Link key={link.href} href={link.href} className={activePath === link.href ? "active" : undefined} aria-current={activePath === link.href ? "page" : undefined}>{link.label}</Link>)}
+          {links.map((link) => <AdminNavLink key={link.href} href={link.href} label={link.label} active={activePath === link.href} />)}
         </nav>
       </aside>
       <section className="main">
