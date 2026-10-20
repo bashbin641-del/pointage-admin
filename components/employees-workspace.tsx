@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useState } from "react";
+import CompactDataLoader from "@/components/compact-data-loader";
 import { useAdminRealtime } from "@/lib/use-admin-realtime";
 
 type Site = { id: string; name: string; active: boolean };
@@ -135,7 +136,7 @@ export default function EmployeesWorkspace({ initialEmployees, initialSites, emp
 
       <section className="panel">
         <h2>Personnel enregistré</h2>
-        {loading ? <p>Chargement…</p> : employees.length ? (
+        {loading ? <CompactDataLoader label="Actualisation des employés…" /> : employees.length ? (
           <div className="table-wrap">
             <table>
               <thead><tr><th>Nom</th><th>Matricule</th><th>Site</th><th>État</th></tr></thead>

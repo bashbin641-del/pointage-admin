@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import CompactDataLoader from "@/components/compact-data-loader";
 import { useAdminRealtime } from "@/lib/use-admin-realtime";
 
 type Site = { id: string; name: string; active: boolean };
@@ -230,7 +231,7 @@ export default function SitesTerminalsWorkspace({ initialSites, initialTerminals
         })}</ul>
       </section>
 
-      {loading ? <p>Chargement…</p> : null}
+      {loading ? <div className="data-loading-row"><CompactDataLoader label="Actualisation des sites et terminaux…" /></div> : null}
       {error ? <p className="form-message error-message" role="alert">{error}</p> : null}
       {message ? <p className="form-message success-message activation-message" role="status">{message}</p> : null}
     </div>
