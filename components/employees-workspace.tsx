@@ -2,6 +2,7 @@
 
 import { useCallback, useState } from "react";
 import CompactDataLoader from "@/components/compact-data-loader";
+import ConfirmationDialog from "@/components/confirmation-dialog";
 import { useAdminRealtime } from "@/lib/use-admin-realtime";
 
 type Site = { id: string; name: string; active: boolean };
@@ -11,10 +12,13 @@ type Props = {
   initialEmployees: Employee[];
   initialSites: Site[];
   employeeAppUrl: string;
+  canManage: boolean;
   initialError?: string;
 };
 
-export default function EmployeesWorkspace({ initialEmployees, initialSites, employeeAppUrl, initialError = "" }: Props) {
+type EmployeeAction = { kind: "block" | "unblock" | "delete"; employee: Employee };
+
+export default function EmployeesWorkspace({ initialEmployees, initialSites, employeeAppUrl, canManage, initialError = "" }: Props) {
   const [employees, setEmployees] = useState<Employee[]>(initialEmployees);
   const [sites, setSites] = useState<Site[]>(initialSites);
   const [error, setError] = useState(initialError);
@@ -23,6 +27,8 @@ export default function EmployeesWorkspace({ initialEmployees, initialSites, emp
   const [copyStatus, setCopyStatus] = useState("");
   const [pending, setPending] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [employeeAction, setEmployeeAction] = useState<EmployeeAction | null>(null);
+  const [actionPending, setActionPending] = useState(false);
 
   const load = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
@@ -43,8 +49,36 @@ export default function EmployeesWorkspace({ initialEmployees, initialSites, emp
   }, []);
 
   useAdminRealtime((event) => {
-    if (event.type === "employee.created" || event.type === "site.created") void load(true);
+    if (["employee.created", "employee.updated", "employee.deleted", "site.created", "site.deleted"].includes(event.type)) void load(true);
   });
+
+  async function applyEmployeeAction() {
+    if (!employeeAction) return;
+    setActionPending(true);
+    setError("");
+    setSuccess("");
+    try {
+      const deleting = employeeAction.kind === "delete";
+      const response = await fetch(`/api/core/admin/employes/${employeeAction.employee.id}${deleting ? "" : "/status"}`, {
+        method: deleting ? "DELETE" : "PATCH",
+        headers: deleting ? undefined : { "Content-Type": "application/json" },
+        body: deleting ? undefined : JSON.stringify({ active: employeeAction.kind === "unblock" }),
+      });
+      const result = await response.json() as { message?: string };
+      if (!response.ok) throw new Error(result.message);
+      setSuccess(deleting
+        ? `${employeeAction.employee.display_name} et son compte de connexion ont été supprimés définitivement.`
+        : employeeAction.kind === "block"
+          ? `${employeeAction.employee.display_name} est bloqué. Aucun nouveau pointage n’est autorisé.`
+          : `${employeeAction.employee.display_name} peut de nouveau se connecter et pointer.`);
+      setEmployeeAction(null);
+      await load();
+    } catch {
+      setError("L’opération sur cet employé n’a pas été confirmée. Réessayez.");
+    } finally {
+      setActionPending(false);
+    }
+  }
 
   async function copyInvitation() {
     if (!invitationUrl) return;
@@ -139,12 +173,24 @@ export default function EmployeesWorkspace({ initialEmployees, initialSites, emp
         {loading ? <CompactDataLoader label="Actualisation des employés…" /> : employees.length ? (
           <div className="table-wrap">
             <table>
-              <thead><tr><th>Nom</th><th>Matricule</th><th>Site</th><th>État</th></tr></thead>
-              <tbody>{employees.map((employee) => <tr key={employee.id}><td>{employee.display_name}</td><td>{employee.matricule}</td><td>{employee.sites?.name ?? "Non affecté"}</td><td>{employee.active ? "Actif" : "Inactif"}</td></tr>)}</tbody>
+              <thead><tr><th>Nom</th><th>Matricule</th><th>Site</th><th>État</th>{canManage ? <th>Actions</th> : null}</tr></thead>
+              <tbody>{employees.map((employee) => <tr key={employee.id}><td>{employee.display_name}</td><td>{employee.matricule}</td><td>{employee.sites?.name ?? "Non affecté"}</td><td><span className={`status-badge ${employee.active ? "active" : "blocked"}`}>{employee.active ? "Actif" : "Bloqué"}</span></td>{canManage ? <td><div className="row-actions"><button className="secondary-button compact-button" type="button" disabled={actionPending} onClick={() => setEmployeeAction({ kind: employee.active ? "block" : "unblock", employee })}>{employee.active ? "Bloquer" : "Réactiver"}</button><button className="danger-button compact-button" type="button" disabled={actionPending} onClick={() => setEmployeeAction({ kind: "delete", employee })}>Supprimer</button></div></td> : null}</tr>)}</tbody>
             </table>
           </div>
         ) : <p>Aucun employé enregistré.</p>}
       </section>
+      {employeeAction ? <ConfirmationDialog
+        title={employeeAction.kind === "delete" ? `Supprimer ${employeeAction.employee.display_name} ?` : employeeAction.kind === "block" ? `Bloquer ${employeeAction.employee.display_name} ?` : `Réactiver ${employeeAction.employee.display_name} ?`}
+        description={employeeAction.kind === "delete"
+          ? "Cette suppression est définitive : le compte Supabase, la fiche employé et tout son historique de présence seront supprimés. La connexion deviendra impossible."
+          : employeeAction.kind === "block"
+            ? "Le compte sera bloqué immédiatement. L’employé ne pourra plus se connecter, générer un QR ni confirmer un pointage."
+            : "Le compte sera réactivé. L’employé pourra de nouveau se connecter et utiliser sa carte de pointage."}
+        confirmLabel={employeeAction.kind === "delete" ? "Supprimer définitivement" : employeeAction.kind === "block" ? "Bloquer l’employé" : "Réactiver l’employé"}
+        pending={actionPending}
+        onCancel={() => setEmployeeAction(null)}
+        onConfirm={() => void applyEmployeeAction()}
+      /> : null}
     </div>
   );
 }

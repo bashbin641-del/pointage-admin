@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import CompactDataLoader from "@/components/compact-data-loader";
+import ConfirmationDialog from "@/components/confirmation-dialog";
 import { useAdminRealtime } from "@/lib/use-admin-realtime";
 
 type Site = { id: string; name: string; active: boolean };
@@ -20,8 +21,11 @@ type ActivationResponse = { terminal?: Terminal; activationCode?: string; activa
 type Props = {
   initialSites: Site[];
   initialTerminals: Terminal[];
+  canManage: boolean;
   initialError?: string;
 };
+
+type DeleteTarget = { kind: "site" | "terminal"; id: string; name: string };
 
 function timeLabel(value: string) {
   return new Intl.DateTimeFormat("fr-CI", {
@@ -38,7 +42,7 @@ function remainingLabel(seconds: number) {
   return `${minutes} min ${String(remainder).padStart(2, "0")} s`;
 }
 
-export default function SitesTerminalsWorkspace({ initialSites, initialTerminals, initialError = "" }: Props) {
+export default function SitesTerminalsWorkspace({ initialSites, initialTerminals, canManage, initialError = "" }: Props) {
   const [sites, setSites] = useState<Site[]>(initialSites);
   const [terminals, setTerminals] = useState<Terminal[]>(initialTerminals);
   const [activation, setActivation] = useState<Activation | null>(null);
@@ -47,6 +51,8 @@ export default function SitesTerminalsWorkspace({ initialSites, initialTerminals
   const [error, setError] = useState(initialError);
   const [loading, setLoading] = useState(false);
   const [pending, setPending] = useState(false);
+  const [deletePending, setDeletePending] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
   const [now, setNow] = useState(() => Date.now());
 
   const load = useCallback(async (silent = false) => {
@@ -68,10 +74,33 @@ export default function SitesTerminalsWorkspace({ initialSites, initialTerminals
   }, []);
 
   useAdminRealtime((event) => {
-    if (["site.created", "terminal.activated", "terminal.created", "terminal.session_revoked"].includes(event.type)) {
+    if (["site.created", "site.deleted", "terminal.activated", "terminal.created", "terminal.deleted", "terminal.session_revoked"].includes(event.type)) {
       void load(true);
     }
   });
+
+  async function deleteRecord() {
+    if (!deleteTarget) return;
+    setDeletePending(true);
+    setError("");
+    setMessage("");
+    try {
+      const path = deleteTarget.kind === "site" ? "sites" : "terminaux";
+      const response = await fetch(`/api/core/admin/${path}/${deleteTarget.id}`, { method: "DELETE" });
+      const result = await response.json() as { message?: string };
+      if (!response.ok) throw new Error(result.message);
+      setMessage(deleteTarget.kind === "site"
+        ? `Le site ${deleteTarget.name}, ses terminaux et son historique associé ont été supprimés définitivement.`
+        : `Le terminal ${deleteTarget.name} et son historique associé ont été supprimés définitivement.`);
+      if (deleteTarget.kind === "site" || activation?.terminalId === deleteTarget.id) setActivation(null);
+      setDeleteTarget(null);
+      await load();
+    } catch {
+      setError(`La suppression ${deleteTarget.kind === "site" ? "du site" : "du terminal"} n’a pas été confirmée. Réessayez.`);
+    } finally {
+      setDeletePending(false);
+    }
+  }
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 1_000);
@@ -178,7 +207,7 @@ export default function SitesTerminalsWorkspace({ initialSites, initialTerminals
           <label>Nom du site<input name="name" required minLength={2} /></label>
           <button className="primary-button" disabled={pending}>Créer le site</button>
         </form>
-        <ul className="record-list">{sites.map((site) => <li key={site.id}><strong>{site.name}</strong><span>{site.active ? "Actif" : "Inactif"}</span></li>)}</ul>
+        <ul className="record-list">{sites.map((site) => <li key={site.id}><div><strong>{site.name}</strong><span>{site.active ? "Actif" : "Inactif"}</span></div>{canManage ? <button className="danger-button compact-button" type="button" disabled={deletePending} onClick={() => setDeleteTarget({ kind: "site", id: site.id, name: site.name })}>Supprimer le site</button> : null}</li>)}</ul>
       </section>
 
       <section className="panel">
@@ -225,7 +254,7 @@ export default function SitesTerminalsWorkspace({ initialSites, initialTerminals
           return (
             <li key={terminal.id}>
               <div><strong>{terminal.name}</strong><span>{terminal.sites?.name} · {terminal.active ? status : "Inactif"}</span></div>
-              {terminal.active && !sessionActive && !localCodeVisible ? <button className="secondary-button" type="button" disabled={pending} onClick={() => void renewActivationCode(terminal)}>{codePending ? "Remplacer le code" : "Générer un nouveau code"}</button> : null}
+              <div className="row-actions">{terminal.active && !sessionActive && !localCodeVisible ? <button className="secondary-button compact-button" type="button" disabled={pending || deletePending} onClick={() => void renewActivationCode(terminal)}>{codePending ? "Remplacer le code" : "Générer un nouveau code"}</button> : null}{canManage ? <button className="danger-button compact-button" type="button" disabled={pending || deletePending} onClick={() => setDeleteTarget({ kind: "terminal", id: terminal.id, name: terminal.name })}>Supprimer</button> : null}</div>
             </li>
           );
         })}</ul>
@@ -234,6 +263,16 @@ export default function SitesTerminalsWorkspace({ initialSites, initialTerminals
       {loading ? <div className="data-loading-row"><CompactDataLoader label="Actualisation des sites et terminaux…" /></div> : null}
       {error ? <p className="form-message error-message" role="alert">{error}</p> : null}
       {message ? <p className="form-message success-message activation-message" role="status">{message}</p> : null}
+      {deleteTarget ? <ConfirmationDialog
+        title={deleteTarget.kind === "site" ? `Supprimer le site ${deleteTarget.name} ?` : `Supprimer le terminal ${deleteTarget.name} ?`}
+        description={deleteTarget.kind === "site"
+          ? "Cette suppression est définitive. Les terminaux du site et tous les pointages liés seront aussi supprimés. Les employés seront conservés, mais sans site attribué."
+          : "Cette suppression est définitive. La session de la borne et tous les pointages enregistrés depuis ce terminal seront supprimés."}
+        confirmLabel={deleteTarget.kind === "site" ? "Supprimer définitivement le site" : "Supprimer définitivement le terminal"}
+        pending={deletePending}
+        onCancel={() => setDeleteTarget(null)}
+        onConfirm={() => void deleteRecord()}
+      /> : null}
     </div>
   );
 }

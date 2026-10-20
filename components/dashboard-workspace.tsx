@@ -24,7 +24,7 @@ export default function DashboardWorkspace({ initialSummary, initialError = "" }
     }
   }, []);
   useAdminRealtime((event) => {
-    if (["attendance.recorded", "employee.created", "site.created", "terminal.activated", "terminal.created", "terminal.session_revoked"].includes(event.type)) {
+    if (["attendance.recorded", "attendance.updated", "attendance.deleted", "employee.created", "employee.updated", "employee.deleted", "site.created", "site.deleted", "terminal.activated", "terminal.created", "terminal.deleted", "terminal.session_revoked"].includes(event.type)) {
       void load(true);
     }
   });
