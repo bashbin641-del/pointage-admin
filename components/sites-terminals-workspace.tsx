@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { useAdminRealtime } from "@/lib/use-admin-realtime";
 
 type Site = { id: string; name: string; active: boolean };
 type Terminal = {
@@ -47,9 +48,8 @@ export default function SitesTerminalsWorkspace({ initialSites, initialTerminals
   const [pending, setPending] = useState(false);
   const [now, setNow] = useState(() => Date.now());
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError("");
+  const load = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true);
     try {
       const [sitesResponse, terminalsResponse] = await Promise.all([
         fetch("/api/core/admin/sites", { cache: "no-store" }),
@@ -58,12 +58,19 @@ export default function SitesTerminalsWorkspace({ initialSites, initialTerminals
       if (!sitesResponse.ok || !terminalsResponse.ok) throw new Error();
       setSites((await sitesResponse.json() as { items: Site[] }).items);
       setTerminals((await terminalsResponse.json() as { items: Terminal[] }).items);
+      setError("");
     } catch {
-      setError("Impossible de charger les sites et les terminaux.");
+      if (!silent) setError("Impossible de charger les sites et les terminaux.");
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, []);
+
+  useAdminRealtime((event) => {
+    if (["site.created", "terminal.activated", "terminal.created", "terminal.session_revoked"].includes(event.type)) {
+      void load(true);
+    }
+  });
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 1_000);

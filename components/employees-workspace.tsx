@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useState } from "react";
+import { useAdminRealtime } from "@/lib/use-admin-realtime";
 
 type Site = { id: string; name: string; active: boolean };
 type Employee = { id: string; matricule: string; display_name: string; active: boolean; sites: { name: string } | null };
@@ -22,9 +23,8 @@ export default function EmployeesWorkspace({ initialEmployees, initialSites, emp
   const [pending, setPending] = useState(false);
   const [loading, setLoading] = useState(false);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError("");
+  const load = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true);
     try {
       const [employeesResponse, sitesResponse] = await Promise.all([
         fetch("/api/core/admin/employes", { cache: "no-store" }),
@@ -33,12 +33,17 @@ export default function EmployeesWorkspace({ initialEmployees, initialSites, emp
       if (!employeesResponse.ok || !sitesResponse.ok) throw new Error();
       setEmployees((await employeesResponse.json() as { items: Employee[] }).items);
       setSites((await sitesResponse.json() as { items: Site[] }).items.filter((site) => site.active));
+      setError("");
     } catch {
-      setError("Impossible de charger les employés et les sites.");
+      if (!silent) setError("Impossible de charger les employés et les sites.");
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, []);
+
+  useAdminRealtime((event) => {
+    if (event.type === "employee.created" || event.type === "site.created") void load(true);
+  });
 
   async function copyInvitation() {
     if (!invitationUrl) return;
