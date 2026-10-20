@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import CompactDataLoader from "@/components/compact-data-loader";
 import ConfirmationDialog from "@/components/confirmation-dialog";
 import { useAdminRealtime } from "@/lib/use-admin-realtime";
@@ -17,6 +17,23 @@ type Props = {
 };
 
 type EmployeeAction = { kind: "block" | "unblock" | "delete"; employee: Employee };
+type EmployeeFilters = {
+  name: string;
+  matricule: string;
+  site: string;
+  status: "" | "active" | "blocked";
+};
+
+const emptyFilters: EmployeeFilters = {
+  name: "",
+  matricule: "",
+  site: "",
+  status: "",
+};
+
+function normalized(value: string) {
+  return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase("fr").trim();
+}
 
 export default function EmployeesWorkspace({ initialEmployees, initialSites, employeeAppUrl, canManage, initialError = "" }: Props) {
   const [employees, setEmployees] = useState<Employee[]>(initialEmployees);
@@ -29,6 +46,29 @@ export default function EmployeesWorkspace({ initialEmployees, initialSites, emp
   const [loading, setLoading] = useState(false);
   const [employeeAction, setEmployeeAction] = useState<EmployeeAction | null>(null);
   const [actionPending, setActionPending] = useState(false);
+  const [filters, setFilters] = useState<EmployeeFilters>(emptyFilters);
+
+  const filteredEmployees = useMemo(() => {
+    const nameQuery = normalized(filters.name);
+    const matriculeQuery = normalized(filters.matricule);
+    const siteQuery = normalized(filters.site);
+
+    return employees.filter((employee) => {
+      const matchesStatus = !filters.status
+        || (filters.status === "active" ? employee.active : !employee.active);
+
+      return (!nameQuery || normalized(employee.display_name).includes(nameQuery))
+        && (!matriculeQuery || normalized(employee.matricule).includes(matriculeQuery))
+        && (!siteQuery || normalized(employee.sites?.name ?? "Non affecté").includes(siteQuery))
+        && matchesStatus;
+    });
+  }, [employees, filters]);
+
+  const hasFilters = Object.values(filters).some(Boolean);
+
+  function updateFilter<Key extends keyof EmployeeFilters>(key: Key, value: EmployeeFilters[Key]) {
+    setFilters((current) => ({ ...current, [key]: value }));
+  }
 
   const load = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
@@ -171,12 +211,24 @@ export default function EmployeesWorkspace({ initialEmployees, initialSites, emp
       <section className="panel">
         <h2>Personnel enregistré</h2>
         {loading ? <CompactDataLoader label="Actualisation des employés…" /> : employees.length ? (
-          <div className="table-wrap">
-            <table>
-              <thead><tr><th>Nom</th><th>Matricule</th><th>Site</th><th>État</th>{canManage ? <th>Actions</th> : null}</tr></thead>
-              <tbody>{employees.map((employee) => <tr key={employee.id}><td>{employee.display_name}</td><td>{employee.matricule}</td><td>{employee.sites?.name ?? "Non affecté"}</td><td><span className={`status-badge ${employee.active ? "active" : "blocked"}`}>{employee.active ? "Actif" : "Bloqué"}</span></td>{canManage ? <td><div className="row-actions"><button className="secondary-button compact-button" type="button" disabled={actionPending} onClick={() => setEmployeeAction({ kind: employee.active ? "block" : "unblock", employee })}>{employee.active ? "Bloquer" : "Réactiver"}</button><button className="danger-button compact-button" type="button" disabled={actionPending} onClick={() => setEmployeeAction({ kind: "delete", employee })}>Supprimer</button></div></td> : null}</tr>)}</tbody>
-            </table>
-          </div>
+          <>
+            <div className="employee-filters" role="search" aria-label="Filtrer les employés">
+              <label>Nom<input type="search" value={filters.name} onChange={(event) => updateFilter("name", event.target.value)} placeholder="Rechercher un nom" /></label>
+              <label>Matricule<input type="search" value={filters.matricule} onChange={(event) => updateFilter("matricule", event.target.value)} placeholder="Rechercher un matricule" /></label>
+              <label>Site<input type="search" value={filters.site} onChange={(event) => updateFilter("site", event.target.value)} placeholder="Rechercher un site" /></label>
+              <label>État<select value={filters.status} onChange={(event) => updateFilter("status", event.target.value as EmployeeFilters["status"])}><option value="">Tous les états</option><option value="active">Actif</option><option value="blocked">Bloqué</option></select></label>
+              <button className="secondary-button compact-button" type="button" onClick={() => setFilters(emptyFilters)} disabled={!hasFilters}>Réinitialiser</button>
+            </div>
+            <p className="filter-summary" role="status">{filteredEmployees.length} résultat{filteredEmployees.length > 1 ? "s" : ""} sur {employees.length} employé{employees.length > 1 ? "s" : ""}.</p>
+            {filteredEmployees.length ? (
+              <div className="table-wrap">
+                <table>
+                  <thead><tr><th>Nom</th><th>Matricule</th><th>Site</th><th>État</th>{canManage ? <th>Actions</th> : null}</tr></thead>
+                  <tbody>{filteredEmployees.map((employee) => <tr key={employee.id}><td>{employee.display_name}</td><td>{employee.matricule}</td><td>{employee.sites?.name ?? "Non affecté"}</td><td><span className={`status-badge ${employee.active ? "active" : "blocked"}`}>{employee.active ? "Actif" : "Bloqué"}</span></td>{canManage ? <td><div className="row-actions"><button className="secondary-button compact-button" type="button" disabled={actionPending} onClick={() => setEmployeeAction({ kind: employee.active ? "block" : "unblock", employee })}>{employee.active ? "Bloquer" : "Réactiver"}</button><button className="danger-button compact-button" type="button" disabled={actionPending} onClick={() => setEmployeeAction({ kind: "delete", employee })}>Supprimer</button></div></td> : null}</tr>)}</tbody>
+                </table>
+              </div>
+            ) : <p>Aucun employé ne correspond aux filtres sélectionnés.</p>}
+          </>
         ) : <p>Aucun employé enregistré.</p>}
       </section>
       {employeeAction ? <ConfirmationDialog
