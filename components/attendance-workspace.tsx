@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import CompactDataLoader from "@/components/compact-data-loader";
 import ConfirmationDialog from "@/components/confirmation-dialog";
 import { useAdminRealtime } from "@/lib/use-admin-realtime";
@@ -15,6 +15,46 @@ type Event = {
 };
 
 type DeleteTarget = { kind: "single"; event: Event } | { kind: "all" };
+
+type AttendanceFilters = {
+  employee: string;
+  eventType: "" | "entree" | "sortie";
+  date: string;
+  time: string;
+  site: string;
+  terminal: string;
+};
+
+const emptyFilters: AttendanceFilters = {
+  employee: "",
+  eventType: "",
+  date: "",
+  time: "",
+  site: "",
+  terminal: "",
+};
+
+const filterDateTimeFormatter = new Intl.DateTimeFormat("fr-CI", {
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  hourCycle: "h23",
+  timeZone: "Africa/Abidjan",
+});
+
+function normalized(value: string | undefined) {
+  return (value ?? "").trim().toLocaleLowerCase("fr").normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+}
+
+function localDateTime(value: string) {
+  const parts = Object.fromEntries(filterDateTimeFormatter.formatToParts(new Date(value)).map((part) => [part.type, part.value]));
+  return {
+    date: `${parts.year}-${parts.month}-${parts.day}`,
+    time: `${parts.hour}:${parts.minute}`,
+  };
+}
 
 function dateTimeInputValue(value: string) {
   return new Date(value).toISOString().slice(0, 16);
@@ -41,6 +81,29 @@ export default function AttendanceWorkspace({
   const [editTarget, setEditTarget] = useState<Event | null>(null);
   const [editValue, setEditValue] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
+  const [filters, setFilters] = useState<AttendanceFilters>(emptyFilters);
+
+  const filteredItems = useMemo(() => {
+    const employeeQuery = normalized(filters.employee);
+    const siteQuery = normalized(filters.site);
+    const terminalQuery = normalized(filters.terminal);
+    return items.filter((item) => {
+      const employee = `${item.employes?.display_name ?? ""} ${item.employes?.matricule ?? ""}`;
+      const dateTime = localDateTime(item.occurred_at);
+      return (!employeeQuery || normalized(employee).includes(employeeQuery))
+        && (!filters.eventType || item.event_type === filters.eventType)
+        && (!filters.date || dateTime.date === filters.date)
+        && (!filters.time || dateTime.time === filters.time)
+        && (!siteQuery || normalized(item.sites?.name).includes(siteQuery))
+        && (!terminalQuery || normalized(item.terminaux?.name).includes(terminalQuery));
+    });
+  }, [filters, items]);
+
+  const hasFilters = Object.values(filters).some(Boolean);
+
+  function updateFilter<Key extends keyof AttendanceFilters>(key: Key, value: AttendanceFilters[Key]) {
+    setFilters((current) => ({ ...current, [key]: value }));
+  }
 
   const load = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
@@ -130,14 +193,24 @@ export default function AttendanceWorkspace({
         {loading ? <CompactDataLoader label="Actualisation des présences…" /> : null}
         {error ? <p className="form-message error-message" role="alert">{error}</p> : null}
         {message ? <p className="form-message success-message" role="status">{message}</p> : null}
-        {items.length ? (
+        {items.length ? <div className="attendance-filters" role="search" aria-label="Filtrer les présences">
+          <label>Employé<input type="search" value={filters.employee} onChange={(event) => updateFilter("employee", event.target.value)} placeholder="Nom ou matricule" /></label>
+          <label>Type<select value={filters.eventType} onChange={(event) => updateFilter("eventType", event.target.value as AttendanceFilters["eventType"])}><option value="">Tous les types</option><option value="entree">Entrée</option><option value="sortie">Sortie</option></select></label>
+          <label>Date<input type="date" value={filters.date} onChange={(event) => updateFilter("date", event.target.value)} /></label>
+          <label>Heure<input type="time" value={filters.time} onChange={(event) => updateFilter("time", event.target.value)} /></label>
+          <label>Site<input type="search" value={filters.site} onChange={(event) => updateFilter("site", event.target.value)} placeholder="Nom du site" /></label>
+          <label>Terminal<input type="search" value={filters.terminal} onChange={(event) => updateFilter("terminal", event.target.value)} placeholder="Nom du terminal" /></label>
+          <button className="secondary-button compact-button" type="button" onClick={() => setFilters(emptyFilters)} disabled={!hasFilters}>Réinitialiser</button>
+        </div> : null}
+        {items.length ? <p className="filter-summary" role="status">{filteredItems.length} résultat{filteredItems.length > 1 ? "s" : ""} sur {items.length} pointage{items.length > 1 ? "s" : ""}.</p> : null}
+        {filteredItems.length ? (
           <div className="table-wrap">
             <table>
               <thead><tr><th>Employé</th><th>Type</th><th>Date et heure</th><th>Site</th><th>Terminal</th>{canManage ? <th>Actions</th> : null}</tr></thead>
-              <tbody>{items.map((item) => <tr key={item.id}><td>{item.employes?.display_name ?? "Compte indisponible"}<small>{item.employes?.matricule}</small></td><td>{item.event_type === "entree" ? "Entrée" : "Sortie"}</td><td>{new Intl.DateTimeFormat("fr-CI", { dateStyle: "medium", timeStyle: "short", timeZone: "Africa/Abidjan" }).format(new Date(item.occurred_at))}</td><td>{item.sites?.name ?? "—"}</td><td>{item.terminaux?.name ?? "—"}</td>{canManage ? <td><div className="row-actions"><button className="secondary-button compact-button" type="button" onClick={() => openEditor(item)} disabled={actionPending}>Modifier</button><button className="danger-button compact-button" type="button" onClick={() => setDeleteTarget({ kind: "single", event: item })} disabled={actionPending}>Supprimer</button></div></td> : null}</tr>)}</tbody>
+              <tbody>{filteredItems.map((item) => <tr key={item.id}><td>{item.employes?.display_name ?? "Compte indisponible"}<small>{item.employes?.matricule}</small></td><td>{item.event_type === "entree" ? "Entrée" : "Sortie"}</td><td>{new Intl.DateTimeFormat("fr-CI", { dateStyle: "medium", timeStyle: "short", timeZone: "Africa/Abidjan" }).format(new Date(item.occurred_at))}</td><td>{item.sites?.name ?? "—"}</td><td>{item.terminaux?.name ?? "—"}</td>{canManage ? <td><div className="row-actions"><button className="secondary-button compact-button" type="button" onClick={() => openEditor(item)} disabled={actionPending}>Modifier</button><button className="danger-button compact-button" type="button" onClick={() => setDeleteTarget({ kind: "single", event: item })} disabled={actionPending}>Supprimer</button></div></td> : null}</tr>)}</tbody>
             </table>
           </div>
-        ) : <p>Aucun pointage confirmé.</p>}
+        ) : <p>{items.length ? "Aucun pointage ne correspond aux filtres sélectionnés." : "Aucun pointage confirmé."}</p>}
       </section>
 
       {editTarget ? <div className="dialog-backdrop" role="presentation"><section className="confirmation-dialog" role="dialog" aria-modal="true" aria-labelledby="edit-attendance-title"><p className="dialog-eyebrow">CORRECTION MANUELLE</p><h2 id="edit-attendance-title">Modifier la date et l’heure</h2><p>Correction de {attendanceLabel(editTarget)}. Cette action sera inscrite dans le journal d’audit.</p><form className="dialog-form" onSubmit={saveAttendance}><label>Date et heure en Côte d’Ivoire<input type="datetime-local" required value={editValue} onChange={(event) => setEditValue(event.target.value)} /></label><div className="dialog-actions"><button className="secondary-button" type="button" onClick={() => setEditTarget(null)} disabled={actionPending}>Annuler</button><button className="primary-button" disabled={actionPending}>{actionPending ? "Enregistrement…" : "Enregistrer la correction"}</button></div></form></section></div> : null}
