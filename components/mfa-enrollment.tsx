@@ -12,9 +12,11 @@ const TOTP_DISPLAY_NAME = "INOX.techs Pointage admin";
 export default function MfaEnrollment({
   email,
   requiresPassword,
+  accountLabel,
 }: {
   email: string;
   requiresPassword: boolean;
+  accountLabel: string;
 }) {
   const router = useRouter();
   const [password, setPassword] = useState("");
@@ -81,7 +83,7 @@ export default function MfaEnrollment({
   if (!enrollment) {
     return (
       <form className="auth-form" onSubmit={prepare}>
-        <div className="auth-account"><span>{requiresPassword ? "Compte invité" : "Compte propriétaire"}</span><strong>{email}</strong></div>
+        <div className="auth-account"><span>{accountLabel}</span><strong>{email}</strong></div>
         {!passwordConfigured ? (
           <>
             <label>Créer un mot de passe<input type="password" autoComplete="new-password" minLength={12} required value={password} onChange={(event) => setPassword(event.target.value)} /></label>

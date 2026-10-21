@@ -3,6 +3,7 @@
 import { useCallback, useMemo, useState } from "react";
 import CompactDataLoader from "@/components/compact-data-loader";
 import ConfirmationDialog from "@/components/confirmation-dialog";
+import { formatMatriculeInput, MATRICULE_PATTERN } from "@/lib/matricule";
 import { useAdminRealtime } from "@/lib/use-admin-realtime";
 
 type Site = { id: string; name: string; active: boolean };
@@ -187,7 +188,7 @@ export default function EmployeesWorkspace({ initialEmployees, initialSites, emp
           <form className="admin-form" onSubmit={submit}>
             <label>Nom affiché<input name="displayName" required minLength={2} /></label>
             <label>E-mail professionnel<input name="email" type="email" required /></label>
-            <label>Matricule<input name="matricule" required minLength={2} /></label>
+            <label>Matricule<input name="matricule" inputMode="numeric" autoComplete="off" required maxLength={11} pattern={MATRICULE_PATTERN} placeholder="000-000-000" title="Saisissez exactement 9 chiffres." onInput={(event) => { event.currentTarget.value = formatMatriculeInput(event.currentTarget.value); }} /></label>
             <label>Site<select name="siteId" required defaultValue=""><option value="" disabled>Choisir un site</option>{sites.map((site) => <option key={site.id} value={site.id}>{site.name}</option>)}</select></label>
             <button className="primary-button" disabled={pending}>{pending ? "Création…" : "Créer l’employé"}</button>
           </form>

@@ -23,5 +23,5 @@ export async function authenticateAdmin(): Promise<AdminAuthResult> {
   const claims = claimsData?.claims as Record<string, unknown> | undefined;
   const sessionId = typeof claims?.session_id === "string" ? claims.session_id : "";
   if (!sessionId) return { ok: false, reason: "unauthenticated" };
-  return { ok: true, user: userData.user, identity: { userId: userData.user.id, sessionId, email: userData.user.email ?? "", displayName: String(metadata.inox_admin_display_name || userData.user.email?.split("@")[0] || "Membre INOX"), role: metadata.inox_admin_role } };
+  return { ok: true, user: userData.user, identity: { userId: userData.user.id, sessionId, email: userData.user.email ?? "", displayName: String(metadata.inox_admin_display_name || userData.user.email?.split("@")[0] || "Membre INOX"), matricule: String(metadata.inox_admin_matricule || "Non attribué"), role: metadata.inox_admin_role } };
 }

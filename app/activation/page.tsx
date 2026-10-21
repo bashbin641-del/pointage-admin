@@ -16,14 +16,17 @@ export default async function ActivationPage() {
   if (!userData.user) redirect("/connexion");
   if (aalData?.currentLevel === "aal2") redirect("/");
 
-  const requiresPassword = userData.user.app_metadata.inox_admin_role !== "owner";
+  const metadata = userData.user.app_metadata;
+  const isOwner = metadata.inox_admin_role === "owner";
+  const requiresPassword = !isOwner;
   return (
     <AuthShell
-      eyebrow="Activation personnelle"
-      title="Sécurisez votre compte"
-      description={requiresPassword ? "Définissez votre mot de passe puis activez votre QR TOTP personnel." : "Activez votre QR TOTP personnel pour protéger votre compte propriétaire."}
+      eyebrow={isOwner ? "Activation propriétaire" : "INVITATION ADMINISTRATEUR"}
+      title={isOwner ? "Sécurisez votre compte" : "Activez votre accès administrateur"}
+      description={requiresPassword ? "Ce lien confidentiel active un compte d’administration INOX. Définissez votre mot de passe puis votre TOTP personnel." : "Activez votre QR TOTP personnel pour protéger votre compte propriétaire."}
     >
-      <MfaEnrollment email={userData.user.email ?? "Compte INOX"} requiresPassword={requiresPassword} />
+      {!isOwner ? <div className="admin-activation-notice" role="note"><strong>Accès administration sécurisé</strong><span>Matricule : {String(metadata.inox_admin_matricule || "Non attribué")} · Une validation TOTP sera exigée à chaque nouvelle session.</span></div> : null}
+      <MfaEnrollment email={userData.user.email ?? "Compte INOX"} requiresPassword={requiresPassword} accountLabel={isOwner ? "Compte propriétaire" : "Compte administrateur invité"} />
     </AuthShell>
   );
 }
