@@ -2,7 +2,8 @@ import { redirect } from "next/navigation";
 import { connection } from "next/server";
 import AdminShell from "@/components/admin-shell";
 import AdministratorsWorkspace from "@/components/administrators-workspace";
-import { listAdministratorMembers, type AdministratorMember } from "@/lib/admin-members";
+import type { AdministratorMember } from "@/lib/admin-members";
+import { coreApi } from "@/lib/api/server";
 import { authenticateAdmin } from "@/lib/auth/server";
 import { canInviteMembers } from "@/lib/auth/types";
 
@@ -15,7 +16,10 @@ export default async function AdministratorsPage() {
   let administrators: AdministratorMember[] = [];
   let initialError = "";
   try {
-    administrators = await listAdministratorMembers();
+    const response = await coreApi("admin/administrateurs");
+    const result = await response.json() as { items?: AdministratorMember[] };
+    if (!response.ok || !result.items) throw new Error("ADMINISTRATORS_UNAVAILABLE");
+    administrators = result.items;
   } catch {
     initialError = "Impossible de charger les comptes administrateurs.";
   }

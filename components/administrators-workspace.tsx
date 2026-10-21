@@ -47,6 +47,9 @@ export default function AdministratorsWorkspace({ initialAdministrators, initial
       if (!response.ok || !result.invitationUrl || !result.member) {
         if (result.error === "email_already_used") throw new Error("Cette adresse e-mail possède déjà un compte.");
         if (result.error === "matricule_already_used") throw new Error("Ce matricule est déjà attribué.");
+        if (result.error === "unauthenticated" || result.error === "mfa_required") throw new Error("Votre session sécurisée a expiré. Reconnectez-vous, puis réessayez.");
+        if (result.error === "forbidden") throw new Error("Votre compte ne dispose pas du droit d’inviter un administrateur.");
+        if (result.error === "service_unavailable") throw new Error("Le service d’administration est momentanément indisponible. Réessayez dans quelques instants.");
         throw new Error("L’invitation administrateur n’a pas été créée. Vérifiez les informations.");
       }
 
@@ -60,7 +63,12 @@ export default function AdministratorsWorkspace({ initialAdministrators, initial
         setSuccess("Administrateur créé. Le lien sécurisé reste disponible ci-dessous pour une copie manuelle.");
       }
     } catch (submitError) {
-      setError(submitError instanceof Error ? submitError.message : "L’invitation administrateur n’a pas été créée.");
+      const message = submitError instanceof TypeError
+        ? "Connexion au service interrompue. Vérifiez votre réseau, puis réessayez."
+        : submitError instanceof Error
+          ? submitError.message
+          : "L’invitation administrateur n’a pas été créée.";
+      setError(message);
     } finally {
       setPending(false);
     }

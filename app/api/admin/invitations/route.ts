@@ -1,9 +1,16 @@
 import { NextResponse } from "next/server";
-import { listAdministratorMembers } from "@/lib/admin-members";
+import type { AdministratorMember } from "@/lib/admin-members";
+import { coreApi } from "@/lib/api/server";
 import { authenticateAdmin } from "@/lib/auth/server";
 import { canInviteMembers } from "@/lib/auth/types";
 import { isValidMatricule } from "@/lib/matricule";
-import { createAdminClient } from "@/lib/supabase/admin";
+
+type CoreResponse = {
+  invitationTokenHash?: string;
+  member?: AdministratorMember;
+  items?: AdministratorMember[];
+  message?: string | string[];
+};
 
 function authFailure(reason: "unauthenticated" | "mfa_required" | "enrollment_required" | "forbidden") {
   return NextResponse.json({ error: reason }, { status: reason === "forbidden" ? 403 : 401 });
@@ -15,7 +22,12 @@ export async function GET() {
   if (!canInviteMembers(auth.identity.role)) return NextResponse.json({ error: "forbidden" }, { status: 403 });
 
   try {
-    return NextResponse.json({ items: await listAdministratorMembers() }, { headers: { "Cache-Control": "no-store" } });
+    const response = await coreApi("admin/administrateurs");
+    const result = await response.json() as CoreResponse;
+    if (!response.ok || !result.items) {
+      return NextResponse.json({ error: "administrators_unavailable" }, { status: response.status >= 500 ? 503 : response.status });
+    }
+    return NextResponse.json({ items: result.items }, { headers: { "Cache-Control": "no-store" } });
   } catch {
     return NextResponse.json({ error: "administrators_unavailable" }, { status: 503 });
   }
@@ -34,55 +46,38 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "invalid_invitation" }, { status: 400 });
   }
 
-  const admin = createAdminClient();
-  const [{ data: usersData, error: usersError }, { data: employee, error: employeeError }] = await Promise.all([
-    admin.auth.admin.listUsers({ page: 1, perPage: 1000 }),
-    admin.from("employes").select("id").eq("matricule", matricule).maybeSingle(),
-  ]);
-  if (usersError || employeeError) return NextResponse.json({ error: "invitation_checks_failed" }, { status: 503 });
+  try {
+    const response = await coreApi("admin/administrateurs", {
+      method: "POST",
+      body: JSON.stringify({ email, displayName, matricule }),
+    });
+    const result = await response.json() as CoreResponse;
+    const messages = Array.isArray(result.message) ? result.message : [result.message];
 
-  const accountExists = usersData.users.some((user) => user.email?.toLowerCase() === email);
-  const matriculeExists = usersData.users.some((user) => user.app_metadata.inox_admin_matricule === matricule);
-  if (accountExists) return NextResponse.json({ error: "email_already_used" }, { status: 409 });
-  if (employee || matriculeExists) return NextResponse.json({ error: "matricule_already_used" }, { status: 409 });
+    if (!response.ok || !result.invitationTokenHash || !result.member) {
+      if (messages.includes("EMAIL_DEJA_UTILISE")) {
+        return NextResponse.json({ error: "email_already_used" }, { status: 409 });
+      }
+      if (messages.includes("MATRICULE_DEJA_ATTRIBUE")) {
+        return NextResponse.json({ error: "matricule_already_used" }, { status: 409 });
+      }
+      if (messages.includes("INVITATION_ADMINISTRATEUR_ECHOUEE")) {
+        return NextResponse.json({ error: "invitation_failed" }, { status: 400 });
+      }
+      if (response.status === 401 || response.status === 403) {
+        return NextResponse.json({ error: response.status === 403 ? "forbidden" : "unauthenticated" }, { status: response.status });
+      }
+      return NextResponse.json({ error: "service_unavailable" }, { status: 503 });
+    }
 
-  const { data: link, error } = await admin.auth.admin.generateLink({
-    type: "invite",
-    email,
-    options: { data: { display_name: displayName, invitation_type: "administrator" } },
-  });
-  if (error || !link.user || !link.properties?.hashed_token) {
-    return NextResponse.json({ error: "invitation_failed" }, { status: 400 });
+    const invitationUrl = new URL("/auth/confirm", request.url);
+    invitationUrl.searchParams.set("token_hash", result.invitationTokenHash);
+    invitationUrl.searchParams.set("type", "invite");
+    return NextResponse.json({
+      invitationUrl: invitationUrl.toString(),
+      member: result.member,
+    }, { headers: { "Cache-Control": "no-store" } });
+  } catch {
+    return NextResponse.json({ error: "service_unavailable" }, { status: 503 });
   }
-
-  const { error: updateError } = await admin.auth.admin.updateUserById(link.user.id, {
-    app_metadata: {
-      ...link.user.app_metadata,
-      inox_admin_active: true,
-      inox_admin_role: "administrator",
-      inox_admin_display_name: displayName,
-      inox_admin_matricule: matricule,
-      inox_admin_invited_by: auth.identity.userId,
-    },
-  });
-  if (updateError) {
-    await admin.auth.admin.deleteUser(link.user.id);
-    return NextResponse.json({ error: "invitation_failed" }, { status: 400 });
-  }
-
-  const invitationUrl = new URL("/auth/confirm", request.url);
-  invitationUrl.searchParams.set("token_hash", link.properties.hashed_token);
-  invitationUrl.searchParams.set("type", "invite");
-  return NextResponse.json({
-    invitationUrl: invitationUrl.toString(),
-    member: {
-      userId: link.user.id,
-      email,
-      displayName,
-      matricule,
-      role: "administrator",
-      status: "pending",
-      createdAt: link.user.created_at,
-    },
-  }, { headers: { "Cache-Control": "no-store" } });
 }
