@@ -9,6 +9,7 @@ const links = [
   { href: "/employes", label: "Employés" },
   { href: "/presences", label: "Présences" },
   { href: "/sites-terminaux", label: "Sites et terminaux" },
+  { href: "/parametres", label: "Paramètres" },
 ];
 
 export default function AdminShell({ identity, activePath, title, children }: { identity: AdminIdentity; activePath: string; title: string; children: ReactNode }) {
@@ -26,7 +27,7 @@ export default function AdminShell({ identity, activePath, title, children }: { 
       </aside>
       <section className="main">
         <header className="topbar">
-          <div><p className="eyebrow">ADMINISTRATION · AAL2</p><h1>{title}</h1><p>Connecté : {identity.displayName} · {identity.matricule} · {identity.role}</p></div>
+          <div><p className="eyebrow">ADMINISTRATION · AAL2</p><h1>{title}</h1><p>Connecté : {identity.displayName} · {identity.matricule} · {identity.email} · {identity.role}</p></div>
           <form action="/api/auth/logout" method="post"><button className="secondary-button">Se déconnecter</button></form>
         </header>
         {children}
