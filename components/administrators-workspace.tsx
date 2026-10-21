@@ -4,7 +4,7 @@ import { useState, type FormEvent } from "react";
 import ConfirmationDialog from "@/components/confirmation-dialog";
 import type { AdministratorMember } from "@/lib/admin-members";
 import { adminRoleLabel } from "@/lib/auth/types";
-import { formatMatriculeInput, MATRICULE_PATTERN } from "@/lib/matricule";
+import { ADMIN_MATRICULE_PATTERN, formatMatriculeInput } from "@/lib/matricule";
 
 type Props = {
   initialAdministrators: AdministratorMember[];
@@ -19,6 +19,8 @@ const statusLabels: Record<AdministratorMember["status"], string> = {
   pending: "Invitation en attente",
   blocked: "Bloqué",
 };
+
+const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Africa/Abidjan" }).format(new Date());
 
 export default function AdministratorsWorkspace({ initialAdministrators, currentUserId, initialError = "" }: Props) {
   const [administrators, setAdministrators] = useState(initialAdministrators);
@@ -45,6 +47,13 @@ export default function AdministratorsWorkspace({ initialAdministrators, current
     setSuccess("");
     setCopyStatus("");
     setInvitationUrl("");
+    const manualMatricule = String(form.get("matricule") ?? "").trim();
+    const hiredAt = String(form.get("hiredAt") ?? "");
+    if (manualMatricule && !new RegExp(`^INOX-ADMIN-${hiredAt.slice(0, 4)}-(?!0000)[0-9]{4}$`).test(manualMatricule)) {
+      setError(`Le matricule doit correspondre à l’année d’embauche : INOX-ADMIN-${hiredAt.slice(0, 4)}-NNNN.`);
+      setPending(false);
+      return;
+    }
 
     try {
       const response = await fetch("/api/admin/invitations", {
@@ -53,7 +62,8 @@ export default function AdministratorsWorkspace({ initialAdministrators, current
         body: JSON.stringify({
           displayName: form.get("displayName"),
           email: form.get("email"),
-          matricule: form.get("matricule"),
+          hiredAt,
+          matricule: manualMatricule || undefined,
           role: form.get("role"),
         }),
       });
@@ -171,7 +181,8 @@ export default function AdministratorsWorkspace({ initialAdministrators, current
         <form className="admin-form" onSubmit={submit}>
           <label>Nom complet<input name="displayName" required minLength={2} maxLength={100} autoComplete="name" /></label>
           <label>E-mail professionnel<input name="email" type="email" required autoComplete="email" /></label>
-          <label>Matricule administrateur<input name="matricule" inputMode="numeric" autoComplete="off" required maxLength={11} pattern={MATRICULE_PATTERN} placeholder="000-000-000" title="Saisissez exactement 9 chiffres." onInput={(event) => { event.currentTarget.value = formatMatriculeInput(event.currentTarget.value); }} /></label>
+          <label>Date d’embauche<input name="hiredAt" type="date" required max={today} defaultValue={today} /></label>
+          <label>Matricule administrateur (facultatif)<input name="matricule" autoComplete="off" maxLength={24} pattern={ADMIN_MATRICULE_PATTERN} placeholder={`Automatique · INOX-ADMIN-${today.slice(0, 4)}-0001`} title="Laissez vide pour obtenir le premier numéro libre, ou saisissez un matricule INOX-ADMIN-AAAA-NNNN disponible." onInput={(event) => { event.currentTarget.value = formatMatriculeInput(event.currentTarget.value); }} /><small>Laissez vide pour une attribution automatique dans l’ordre croissant.</small></label>
           <label>Rôle<select name="role" defaultValue="maintainer" required><option value="maintainer">Mainteneur — opérations uniquement</option><option value="administrator">Administrateur — tous les droits hors propriétaire</option></select></label>
           <button className="danger-button" disabled={pending}>{pending ? "Création sécurisée…" : "Créer l’invitation"}</button>
         </form>

@@ -3,12 +3,12 @@
 import { useCallback, useMemo, useState } from "react";
 import CompactDataLoader from "@/components/compact-data-loader";
 import ConfirmationDialog from "@/components/confirmation-dialog";
-import { formatMatriculeInput, MATRICULE_PATTERN } from "@/lib/matricule";
+import { EMPLOYEE_MATRICULE_PATTERN, formatMatriculeInput } from "@/lib/matricule";
 import { useAdminRealtime } from "@/lib/use-admin-realtime";
 
 type Site = { id: string; name: string; active: boolean };
 type EmployeeStatus = "active" | "pending" | "blocked";
-type Employee = { id: string; matricule: string; display_name: string; email: string; active: boolean; status: EmployeeStatus; sites: { name: string } | null };
+type Employee = { id: string; matricule: string; hired_at: string; display_name: string; email: string; active: boolean; status: EmployeeStatus; sites: { name: string } | null };
 
 type Props = {
   initialEmployees: Employee[];
@@ -32,6 +32,8 @@ const emptyFilters: EmployeeFilters = {
   site: "",
   status: "",
 };
+
+const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Africa/Abidjan" }).format(new Date());
 
 function normalized(value: string) {
   return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase("fr").trim();
@@ -170,10 +172,18 @@ export default function EmployeesWorkspace({ initialEmployees, initialSites, emp
     setInvitationUrl("");
     setCopyStatus("");
     const form = new FormData(formElement);
+    const manualMatricule = String(form.get("matricule") ?? "").trim();
+    const hiredAt = String(form.get("hiredAt") ?? "");
+    if (manualMatricule && !new RegExp(`^INOX-EMP-${hiredAt.slice(0, 4)}-(?!0000)[0-9]{4}$`).test(manualMatricule)) {
+      setError(`Le matricule doit correspondre à l’année d’embauche : INOX-EMP-${hiredAt.slice(0, 4)}-NNNN.`);
+      setPending(false);
+      return;
+    }
     const body = {
       email: form.get("email"),
       displayName: form.get("displayName"),
-      matricule: form.get("matricule"),
+      hiredAt,
+      matricule: manualMatricule || undefined,
       siteId: form.get("siteId"),
     };
 
@@ -218,7 +228,8 @@ export default function EmployeesWorkspace({ initialEmployees, initialSites, emp
           <form className="admin-form" onSubmit={submit}>
             <label>Nom affiché<input name="displayName" required minLength={2} /></label>
             <label>E-mail professionnel<input name="email" type="email" required /></label>
-            <label>Matricule<input name="matricule" inputMode="numeric" autoComplete="off" required maxLength={11} pattern={MATRICULE_PATTERN} placeholder="000-000-000" title="Saisissez exactement 9 chiffres." onInput={(event) => { event.currentTarget.value = formatMatriculeInput(event.currentTarget.value); }} /></label>
+            <label>Date d’embauche<input name="hiredAt" type="date" required max={today} defaultValue={today} /></label>
+            <label>Matricule (facultatif)<input name="matricule" autoComplete="off" maxLength={22} pattern={EMPLOYEE_MATRICULE_PATTERN} placeholder={`Automatique · INOX-EMP-${today.slice(0, 4)}-0001`} title="Laissez vide pour obtenir le premier numéro libre, ou saisissez un matricule INOX-EMP-AAAA-NNNN disponible." onInput={(event) => { event.currentTarget.value = formatMatriculeInput(event.currentTarget.value); }} /><small>Laissez vide pour une attribution automatique dans l’ordre croissant.</small></label>
             <label>Site<select name="siteId" required defaultValue=""><option value="" disabled>Choisir un site</option>{sites.map((site) => <option key={site.id} value={site.id}>{site.name}</option>)}</select></label>
             <button className="primary-button" disabled={pending}>{pending ? "Création…" : "Créer l’employé"}</button>
           </form>

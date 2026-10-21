@@ -1,10 +1,11 @@
-export const MATRICULE_PATTERN = "[0-9]{3}-[0-9]{3}-[0-9]{3}";
+export const EMPLOYEE_MATRICULE_PATTERN = "INOX-EMP-[0-9]{4}-(?!0000)[0-9]{4}";
+export const ADMIN_MATRICULE_PATTERN = "INOX-ADMIN-[0-9]{4}-(?!0000)[0-9]{4}";
 
 export function formatMatriculeInput(value: string) {
-  const digits = value.replace(/\D/g, "").slice(0, 9);
-  return digits.match(/.{1,3}/g)?.join("-") ?? "";
+  return value.toUpperCase().replace(/\s/g, "").slice(0, 24);
 }
 
-export function isValidMatricule(value: string) {
-  return /^[0-9]{3}-[0-9]{3}-[0-9]{3}$/.test(value);
+export function isValidAdminMatricule(value: string, hiredAt: string) {
+  const year = hiredAt.slice(0, 4);
+  return new RegExp(`^INOX-ADMIN-${year}-(?!0000)[0-9]{4}$`).test(value);
 }

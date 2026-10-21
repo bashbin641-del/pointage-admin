@@ -3,7 +3,7 @@ import type { AdministratorMember } from "@/lib/admin-members";
 import { coreApi } from "@/lib/api/server";
 import { authenticateAdmin } from "@/lib/auth/server";
 import { canInviteMembers } from "@/lib/auth/types";
-import { isValidMatricule } from "@/lib/matricule";
+import { isValidAdminMatricule } from "@/lib/matricule";
 
 type CoreResponse = {
   invitationTokenHash?: string;
@@ -38,19 +38,20 @@ export async function POST(request: Request) {
   if (!auth.ok) return authFailure(auth.reason);
   if (!canInviteMembers(auth.identity.role)) return NextResponse.json({ error: "forbidden" }, { status: 403 });
 
-  const body = await request.json() as { email?: string; displayName?: string; matricule?: string; role?: string };
+  const body = await request.json() as { email?: string; displayName?: string; hiredAt?: string; matricule?: string; role?: string };
   const email = body.email?.trim().toLowerCase();
   const displayName = body.displayName?.trim();
   const matricule = body.matricule?.trim();
+  const hiredAt = body.hiredAt?.trim();
   const role = body.role;
-  if (!email || !/^\S+@\S+\.\S+$/.test(email) || !displayName || displayName.length < 2 || displayName.length > 100 || !matricule || !isValidMatricule(matricule) || (role !== "administrator" && role !== "maintainer")) {
+  if (!email || !/^\S+@\S+\.\S+$/.test(email) || !displayName || displayName.length < 2 || displayName.length > 100 || !hiredAt || !/^\d{4}-\d{2}-\d{2}$/.test(hiredAt) || (matricule && !isValidAdminMatricule(matricule, hiredAt)) || (role !== "administrator" && role !== "maintainer")) {
     return NextResponse.json({ error: "invalid_invitation" }, { status: 400 });
   }
 
   try {
     const response = await coreApi("admin/administrateurs", {
       method: "POST",
-      body: JSON.stringify({ email, displayName, matricule, role }),
+      body: JSON.stringify({ email, displayName, hiredAt, matricule: matricule || undefined, role }),
     });
     const result = await response.json() as CoreResponse;
     const messages = Array.isArray(result.message) ? result.message : [result.message];
