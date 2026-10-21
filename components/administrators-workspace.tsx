@@ -95,7 +95,7 @@ export default function AdministratorsWorkspace({ initialAdministrators, initial
       const response = await fetch(`/api/core/admin/administrateurs/${administrator.userId}/invitation`, { method: "POST" });
       const result = await response.json() as { invitationTokenHash?: string; invitationType?: "invite" | "recovery"; message?: string | string[] };
       if (!response.ok || !result.invitationTokenHash || !result.invitationType) throw new Error();
-      const url = new URL("/auth/confirm", window.location.origin);
+      const url = new URL("/invitation", window.location.origin);
       url.searchParams.set("token_hash", result.invitationTokenHash);
       url.searchParams.set("type", result.invitationType);
       const invitation = url.toString();

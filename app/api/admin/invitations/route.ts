@@ -70,7 +70,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "service_unavailable" }, { status: 503 });
     }
 
-    const invitationUrl = new URL("/auth/confirm", request.url);
+    const invitationUrl = new URL("/invitation", request.url);
     invitationUrl.searchParams.set("token_hash", result.invitationTokenHash);
     invitationUrl.searchParams.set("type", "invite");
     return NextResponse.json({
