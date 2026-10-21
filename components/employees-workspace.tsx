@@ -7,7 +7,8 @@ import { formatMatriculeInput, MATRICULE_PATTERN } from "@/lib/matricule";
 import { useAdminRealtime } from "@/lib/use-admin-realtime";
 
 type Site = { id: string; name: string; active: boolean };
-type Employee = { id: string; matricule: string; display_name: string; active: boolean; sites: { name: string } | null };
+type EmployeeStatus = "active" | "pending" | "blocked";
+type Employee = { id: string; matricule: string; display_name: string; email: string; active: boolean; status: EmployeeStatus; sites: { name: string } | null };
 
 type Props = {
   initialEmployees: Employee[];
@@ -22,7 +23,7 @@ type EmployeeFilters = {
   name: string;
   matricule: string;
   site: string;
-  status: "" | "active" | "blocked";
+  status: "" | EmployeeStatus;
 };
 
 const emptyFilters: EmployeeFilters = {
@@ -47,6 +48,7 @@ export default function EmployeesWorkspace({ initialEmployees, initialSites, emp
   const [loading, setLoading] = useState(false);
   const [employeeAction, setEmployeeAction] = useState<EmployeeAction | null>(null);
   const [actionPending, setActionPending] = useState(false);
+  const [regeneratingEmployeeId, setRegeneratingEmployeeId] = useState("");
   const [filters, setFilters] = useState<EmployeeFilters>(emptyFilters);
 
   const filteredEmployees = useMemo(() => {
@@ -55,8 +57,7 @@ export default function EmployeesWorkspace({ initialEmployees, initialSites, emp
     const siteQuery = normalized(filters.site);
 
     return employees.filter((employee) => {
-      const matchesStatus = !filters.status
-        || (filters.status === "active" ? employee.active : !employee.active);
+      const matchesStatus = !filters.status || employee.status === filters.status;
 
       return (!nameQuery || normalized(employee.display_name).includes(nameQuery))
         && (!matriculeQuery || normalized(employee.matricule).includes(matriculeQuery))
@@ -131,6 +132,35 @@ export default function EmployeesWorkspace({ initialEmployees, initialSites, emp
     }
   }
 
+  async function regenerateInvitation(employee: Employee) {
+    setRegeneratingEmployeeId(employee.id);
+    setError("");
+    setSuccess("");
+    setInvitationUrl("");
+    setCopyStatus("");
+    try {
+      const response = await fetch(`/api/core/admin/employes/${employee.id}/invitation`, { method: "POST" });
+      const result = await response.json() as { invitationTokenHash?: string; invitationType?: "invite" | "recovery"; message?: string | string[] };
+      if (!response.ok || !result.invitationTokenHash || !result.invitationType) throw new Error();
+      const url = new URL("/activation", employeeAppUrl);
+      url.searchParams.set("token_hash", result.invitationTokenHash);
+      url.searchParams.set("type", result.invitationType);
+      const invitation = url.toString();
+      setInvitationUrl(invitation);
+      try {
+        await navigator.clipboard.writeText(invitation);
+        setSuccess(`Nouveau lien créé pour ${employee.display_name}. Il est affiché ci-dessous et a été copié.`);
+      } catch {
+        setSuccess(`Nouveau lien créé pour ${employee.display_name}. Il reste disponible ci-dessous pour une copie manuelle.`);
+      }
+      await load(true);
+    } catch {
+      setError("Le lien d’invitation n’a pas pu être régénéré. Réessayez.");
+    } finally {
+      setRegeneratingEmployeeId("");
+    }
+  }
+
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const formElement = event.currentTarget;
@@ -153,12 +183,12 @@ export default function EmployeesWorkspace({ initialEmployees, initialSites, emp
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-      const result = await response.json() as { invitationTokenHash?: string; message?: string };
+      const result = await response.json() as { invitationTokenHash?: string; invitationType?: "invite" | "recovery"; message?: string };
       if (!response.ok || !result.invitationTokenHash) throw new Error(result.message);
 
       const url = new URL("/activation", employeeAppUrl);
       url.searchParams.set("token_hash", result.invitationTokenHash);
-      url.searchParams.set("type", "invite");
+      url.searchParams.set("type", result.invitationType ?? "invite");
       const invitation = url.toString();
       setInvitationUrl(invitation);
       formElement.reset();
@@ -198,7 +228,7 @@ export default function EmployeesWorkspace({ initialEmployees, initialSites, emp
         {invitationUrl ? (
           <section className="invitation-panel" aria-labelledby="invitation-title">
             <h3 id="invitation-title">Lien d’invitation</h3>
-            <p>Transmettez ce lien uniquement à l’employé concerné. Il reste visible ici jusqu’à la création d’une nouvelle invitation ou au rechargement de la page.</p>
+            <p>Transmettez ce lien temporaire uniquement à l’employé concerné. S’il expire, utilisez « Régénérer le lien » dans le tableau.</p>
             <label htmlFor="employee-invitation-link">Lien à transmettre</label>
             <div className="invitation-copy-row">
               <input id="employee-invitation-link" value={invitationUrl} readOnly onFocus={(event) => event.currentTarget.select()} />
@@ -217,7 +247,7 @@ export default function EmployeesWorkspace({ initialEmployees, initialSites, emp
               <label>Nom<input type="search" value={filters.name} onChange={(event) => updateFilter("name", event.target.value)} placeholder="Rechercher un nom" /></label>
               <label>Matricule<input type="search" value={filters.matricule} onChange={(event) => updateFilter("matricule", event.target.value)} placeholder="Rechercher un matricule" /></label>
               <label>Site<input type="search" value={filters.site} onChange={(event) => updateFilter("site", event.target.value)} placeholder="Rechercher un site" /></label>
-              <label>État<select value={filters.status} onChange={(event) => updateFilter("status", event.target.value as EmployeeFilters["status"])}><option value="">Tous les états</option><option value="active">Actif</option><option value="blocked">Bloqué</option></select></label>
+              <label>État<select value={filters.status} onChange={(event) => updateFilter("status", event.target.value as EmployeeFilters["status"])}><option value="">Tous les états</option><option value="active">Actif</option><option value="pending">Invitation en attente</option><option value="blocked">Bloqué</option></select></label>
               <button className="secondary-button compact-button" type="button" onClick={() => setFilters(emptyFilters)} disabled={!hasFilters}>Réinitialiser</button>
             </div>
             <p className="filter-summary" role="status">{filteredEmployees.length} résultat{filteredEmployees.length > 1 ? "s" : ""} sur {employees.length} employé{employees.length > 1 ? "s" : ""}.</p>
@@ -225,7 +255,7 @@ export default function EmployeesWorkspace({ initialEmployees, initialSites, emp
               <div className="table-wrap" tabIndex={0} role="region" aria-label="Tableau des employés, défilement vertical et horizontal disponible">
                 <table>
                   <thead><tr><th>Nom</th><th>Matricule</th><th>Site</th><th>État</th>{canManage ? <th>Actions</th> : null}</tr></thead>
-                  <tbody>{filteredEmployees.map((employee) => <tr key={employee.id}><td>{employee.display_name}</td><td>{employee.matricule}</td><td>{employee.sites?.name ?? "Non affecté"}</td><td><span className={`status-badge ${employee.active ? "active" : "blocked"}`}>{employee.active ? "Actif" : "Bloqué"}</span></td>{canManage ? <td><div className="row-actions"><button className="secondary-button compact-button" type="button" disabled={actionPending} onClick={() => setEmployeeAction({ kind: employee.active ? "block" : "unblock", employee })}>{employee.active ? "Bloquer" : "Réactiver"}</button><button className="danger-button compact-button" type="button" disabled={actionPending} onClick={() => setEmployeeAction({ kind: "delete", employee })}>Supprimer</button></div></td> : null}</tr>)}</tbody>
+                  <tbody>{filteredEmployees.map((employee) => <tr key={employee.id}><td>{employee.display_name}</td><td>{employee.matricule}</td><td>{employee.sites?.name ?? "Non affecté"}</td><td><span className={`status-badge ${employee.status}`}>{employee.status === "active" ? "Actif" : employee.status === "pending" ? "Invitation en attente" : "Bloqué"}</span></td>{canManage ? <td><div className="row-actions">{employee.status === "pending" ? <button className="secondary-button compact-button" type="button" disabled={Boolean(regeneratingEmployeeId) || actionPending} onClick={() => void regenerateInvitation(employee)}>{regeneratingEmployeeId === employee.id ? "Génération…" : "Régénérer le lien"}</button> : null}<button className="secondary-button compact-button" type="button" disabled={actionPending || Boolean(regeneratingEmployeeId)} onClick={() => setEmployeeAction({ kind: employee.active ? "block" : "unblock", employee })}>{employee.active ? "Bloquer" : "Réactiver"}</button><button className="danger-button compact-button" type="button" disabled={actionPending || Boolean(regeneratingEmployeeId)} onClick={() => setEmployeeAction({ kind: "delete", employee })}>Supprimer</button></div></td> : null}</tr>)}</tbody>
                 </table>
               </div>
             ) : <p>Aucun employé ne correspond aux filtres sélectionnés.</p>}

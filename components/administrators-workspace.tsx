@@ -22,6 +22,7 @@ export default function AdministratorsWorkspace({ initialAdministrators, initial
   const [success, setSuccess] = useState("");
   const [copyStatus, setCopyStatus] = useState("");
   const [pending, setPending] = useState(false);
+  const [regeneratingUserId, setRegeneratingUserId] = useState("");
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -84,6 +85,34 @@ export default function AdministratorsWorkspace({ initialAdministrators, initial
     }
   }
 
+  async function regenerateInvitation(administrator: AdministratorMember) {
+    setRegeneratingUserId(administrator.userId);
+    setError("");
+    setSuccess("");
+    setCopyStatus("");
+    setInvitationUrl("");
+    try {
+      const response = await fetch(`/api/core/admin/administrateurs/${administrator.userId}/invitation`, { method: "POST" });
+      const result = await response.json() as { invitationTokenHash?: string; invitationType?: "invite" | "recovery"; message?: string | string[] };
+      if (!response.ok || !result.invitationTokenHash || !result.invitationType) throw new Error();
+      const url = new URL("/auth/confirm", window.location.origin);
+      url.searchParams.set("token_hash", result.invitationTokenHash);
+      url.searchParams.set("type", result.invitationType);
+      const invitation = url.toString();
+      setInvitationUrl(invitation);
+      try {
+        await navigator.clipboard.writeText(invitation);
+        setSuccess(`Nouveau lien créé pour ${administrator.displayName}. Il est affiché ci-dessous et a été copié.`);
+      } catch {
+        setSuccess(`Nouveau lien créé pour ${administrator.displayName}. Il reste disponible ci-dessous pour une copie manuelle.`);
+      }
+    } catch {
+      setError("Le lien administrateur n’a pas pu être régénéré. Réessayez.");
+    } finally {
+      setRegeneratingUserId("");
+    }
+  }
+
   return (
     <div className="workspace">
       <section className="panel sensitive-admin-panel">
@@ -104,7 +133,7 @@ export default function AdministratorsWorkspace({ initialAdministrators, initial
           <section className="admin-invitation-panel" aria-labelledby="admin-invitation-title">
             <p className="admin-invitation-kicker">LIEN D’INSCRIPTION ADMINISTRATEUR</p>
             <h3 id="admin-invitation-title">Invitation confidentielle à usage personnel</h3>
-            <p>Transmettez ce lien uniquement à l’administrateur concerné. Il ouvre l’activation du mot de passe et du TOTP administrateur, jamais l’espace employé.</p>
+            <p>Transmettez ce lien temporaire uniquement à l’administrateur concerné. S’il expire, régénérez-le depuis la ligne du compte en attente.</p>
             <label htmlFor="administrator-invitation-link">Lien sécurisé</label>
             <div className="invitation-copy-row">
               <input id="administrator-invitation-link" value={invitationUrl} readOnly onFocus={(event) => event.currentTarget.select()} />
@@ -120,8 +149,8 @@ export default function AdministratorsWorkspace({ initialAdministrators, initial
         {administrators.length ? (
           <div className="table-wrap" tabIndex={0} role="region" aria-label="Tableau des administrateurs, défilement vertical et horizontal disponible">
             <table>
-              <thead><tr><th>Nom</th><th>Matricule</th><th>E-mail</th><th>Rôle</th><th>État</th></tr></thead>
-              <tbody>{administrators.map((administrator) => <tr key={administrator.userId}><td>{administrator.displayName}</td><td>{administrator.matricule}</td><td>{administrator.email}</td><td>{administrator.role === "owner" ? "Propriétaire" : "Administrateur"}</td><td><span className={`status-badge ${administrator.status}`}>{statusLabels[administrator.status]}</span></td></tr>)}</tbody>
+              <thead><tr><th>Nom</th><th>Matricule</th><th>E-mail</th><th>Rôle</th><th>État</th><th>Action</th></tr></thead>
+              <tbody>{administrators.map((administrator) => <tr key={administrator.userId}><td>{administrator.displayName}</td><td>{administrator.matricule}</td><td>{administrator.email}</td><td>{administrator.role === "owner" ? "Propriétaire" : "Administrateur"}</td><td><span className={`status-badge ${administrator.status}`}>{statusLabels[administrator.status]}</span></td><td>{administrator.role === "administrator" && administrator.status === "pending" ? <button className="secondary-button compact-button" type="button" disabled={Boolean(regeneratingUserId)} onClick={() => void regenerateInvitation(administrator)}>{regeneratingUserId === administrator.userId ? "Génération…" : "Régénérer le lien"}</button> : <span aria-label="Aucune action disponible">—</span>}</td></tr>)}</tbody>
             </table>
           </div>
         ) : <p>Aucun compte administrateur disponible.</p>}
