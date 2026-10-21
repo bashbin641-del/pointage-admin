@@ -21,7 +21,8 @@ type ActivationResponse = { terminal?: Terminal; activationCode?: string; activa
 type Props = {
   initialSites: Site[];
   initialTerminals: Terminal[];
-  canManage: boolean;
+  canCreate: boolean;
+  canDelete: boolean;
   initialError?: string;
 };
 
@@ -42,7 +43,7 @@ function remainingLabel(seconds: number) {
   return `${minutes} min ${String(remainder).padStart(2, "0")} s`;
 }
 
-export default function SitesTerminalsWorkspace({ initialSites, initialTerminals, canManage, initialError = "" }: Props) {
+export default function SitesTerminalsWorkspace({ initialSites, initialTerminals, canCreate, canDelete, initialError = "" }: Props) {
   const [sites, setSites] = useState<Site[]>(initialSites);
   const [terminals, setTerminals] = useState<Terminal[]>(initialTerminals);
   const [activation, setActivation] = useState<Activation | null>(null);
@@ -203,22 +204,22 @@ export default function SitesTerminalsWorkspace({ initialSites, initialTerminals
     <div className="workspace two-panels">
       <section className="panel">
         <h2>Sites</h2>
-        <form className="admin-form compact" onSubmit={createSite}>
+        {canCreate ? <form className="admin-form compact" onSubmit={createSite}>
           <label>Nom du site<input name="name" required minLength={2} /></label>
           <button className="primary-button" disabled={pending}>Créer le site</button>
-        </form>
-        <ul className="record-list" tabIndex={0} aria-label="Liste des sites, défilement vertical disponible">{sites.map((site) => <li key={site.id}><div><strong>{site.name}</strong><span>{site.active ? "Actif" : "Inactif"}</span></div>{canManage ? <button className="danger-button compact-button" type="button" disabled={deletePending} onClick={() => setDeleteTarget({ kind: "site", id: site.id, name: site.name })}>Supprimer le site</button> : null}</li>)}</ul>
+        </form> : null}
+        <ul className="record-list" tabIndex={0} aria-label="Liste des sites, défilement vertical disponible">{sites.map((site) => <li key={site.id}><div><strong>{site.name}</strong><span>{site.active ? "Actif" : "Inactif"}</span></div>{canDelete ? <button className="danger-button compact-button" type="button" disabled={deletePending} onClick={() => setDeleteTarget({ kind: "site", id: site.id, name: site.name })}>Supprimer le site</button> : null}</li>)}</ul>
       </section>
 
       <section className="panel">
         <h2>Terminaux de pointage</h2>
-        {sites.length ? (
+        {canCreate && sites.length ? (
           <form className="admin-form compact" onSubmit={createTerminal}>
             <label>Nom du terminal<input name="name" required minLength={2} /></label>
             <label>Site<select name="siteId" required defaultValue=""><option value="" disabled>Choisir un site</option>{sites.filter((site) => site.active).map((site) => <option key={site.id} value={site.id}>{site.name}</option>)}</select></label>
             <button className="primary-button" disabled={pending}>Créer un terminal</button>
           </form>
-        ) : <p>Créez d’abord un site.</p>}
+        ) : canCreate ? <p>Créez d’abord un site.</p> : null}
 
         {activation ? (
           <section className={`activation-code-panel ${activationExpired ? "expired" : ""}`} aria-labelledby="activation-code-title">
@@ -254,7 +255,7 @@ export default function SitesTerminalsWorkspace({ initialSites, initialTerminals
           return (
             <li key={terminal.id}>
               <div><strong>{terminal.name}</strong><span>{terminal.sites?.name} · {terminal.active ? status : "Inactif"}</span></div>
-              <div className="row-actions">{terminal.active && !sessionActive && !localCodeVisible ? <button className="secondary-button compact-button" type="button" disabled={pending || deletePending} onClick={() => void renewActivationCode(terminal)}>{codePending ? "Remplacer le code" : "Générer un nouveau code"}</button> : null}{canManage ? <button className="danger-button compact-button" type="button" disabled={pending || deletePending} onClick={() => setDeleteTarget({ kind: "terminal", id: terminal.id, name: terminal.name })}>Supprimer</button> : null}</div>
+              <div className="row-actions">{canCreate && terminal.active && !sessionActive && !localCodeVisible ? <button className="secondary-button compact-button" type="button" disabled={pending || deletePending} onClick={() => void renewActivationCode(terminal)}>{codePending ? "Remplacer le code" : "Générer un nouveau code"}</button> : null}{canDelete ? <button className="danger-button compact-button" type="button" disabled={pending || deletePending} onClick={() => setDeleteTarget({ kind: "terminal", id: terminal.id, name: terminal.name })}>Supprimer</button> : null}</div>
             </li>
           );
         })}</ul>

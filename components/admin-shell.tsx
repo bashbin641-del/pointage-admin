@@ -2,7 +2,7 @@ import Image from "next/image";
 import Link from "next/link";
 import type { ReactNode } from "react";
 import AdminNavLink from "@/components/admin-nav-link";
-import { canInviteMembers, type AdminIdentity } from "@/lib/auth/types";
+import { adminRoleLabel, canInviteMembers, type AdminIdentity } from "@/lib/auth/types";
 
 const links = [
   { href: "/", label: "Tableau de bord" },
@@ -27,7 +27,7 @@ export default function AdminShell({ identity, activePath, title, children }: { 
       </aside>
       <section className="main">
         <header className="topbar">
-          <div><p className="eyebrow">ADMINISTRATION · AAL2</p><h1>{title}</h1><p>Connecté : {identity.displayName} · {identity.matricule} · {identity.email} · {identity.role}</p></div>
+          <div><p className="eyebrow">ADMINISTRATION · AAL2</p><h1>{title}</h1><p>Connecté : {identity.displayName} · {identity.matricule} · {identity.email} · {adminRoleLabel(identity.role)}</p></div>
           <form action="/api/auth/logout" method="post"><button className="secondary-button">Se déconnecter</button></form>
         </header>
         {children}

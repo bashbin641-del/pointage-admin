@@ -1,13 +1,18 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
+import ConfirmationDialog from "@/components/confirmation-dialog";
 import type { AdministratorMember } from "@/lib/admin-members";
+import { adminRoleLabel } from "@/lib/auth/types";
 import { formatMatriculeInput, MATRICULE_PATTERN } from "@/lib/matricule";
 
 type Props = {
   initialAdministrators: AdministratorMember[];
+  currentUserId: string;
   initialError?: string;
 };
+
+type ManagedRole = "administrator" | "maintainer";
 
 const statusLabels: Record<AdministratorMember["status"], string> = {
   active: "Actif",
@@ -15,7 +20,7 @@ const statusLabels: Record<AdministratorMember["status"], string> = {
   blocked: "Bloqué",
 };
 
-export default function AdministratorsWorkspace({ initialAdministrators, initialError = "" }: Props) {
+export default function AdministratorsWorkspace({ initialAdministrators, currentUserId, initialError = "" }: Props) {
   const [administrators, setAdministrators] = useState(initialAdministrators);
   const [invitationUrl, setInvitationUrl] = useState("");
   const [error, setError] = useState(initialError);
@@ -23,6 +28,13 @@ export default function AdministratorsWorkspace({ initialAdministrators, initial
   const [copyStatus, setCopyStatus] = useState("");
   const [pending, setPending] = useState(false);
   const [regeneratingUserId, setRegeneratingUserId] = useState("");
+  const [rolePendingUserId, setRolePendingUserId] = useState("");
+  const [roleTarget, setRoleTarget] = useState<{ administrator: AdministratorMember; role: ManagedRole } | null>(null);
+  const [draftRoles, setDraftRoles] = useState<Record<string, ManagedRole>>(() => Object.fromEntries(
+    initialAdministrators
+      .filter((administrator): administrator is AdministratorMember & { role: ManagedRole } => administrator.role !== "owner")
+      .map((administrator) => [administrator.userId, administrator.role]),
+  ));
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -42,6 +54,7 @@ export default function AdministratorsWorkspace({ initialAdministrators, initial
           displayName: form.get("displayName"),
           email: form.get("email"),
           matricule: form.get("matricule"),
+          role: form.get("role"),
         }),
       });
       const result = await response.json() as { invitationUrl?: string; member?: AdministratorMember; error?: string };
@@ -56,12 +69,15 @@ export default function AdministratorsWorkspace({ initialAdministrators, initial
 
       setInvitationUrl(result.invitationUrl);
       setAdministrators((current) => [...current, result.member!].sort((first, second) => first.displayName.localeCompare(second.displayName, "fr")));
+      if (result.member.role !== "owner") {
+        setDraftRoles((current) => ({ ...current, [result.member!.userId]: result.member!.role as ManagedRole }));
+      }
       formElement.reset();
       try {
         await navigator.clipboard.writeText(result.invitationUrl);
-        setSuccess("Administrateur créé. Le lien sécurisé est affiché ci-dessous et a été copié.");
+        setSuccess(`${adminRoleLabel(result.member.role)} créé. Le lien sécurisé est affiché ci-dessous et a été copié.`);
       } catch {
-        setSuccess("Administrateur créé. Le lien sécurisé reste disponible ci-dessous pour une copie manuelle.");
+        setSuccess(`${adminRoleLabel(result.member.role)} créé. Le lien sécurisé reste disponible ci-dessous pour une copie manuelle.`);
       }
     } catch (submitError) {
       const message = submitError instanceof TypeError
@@ -113,25 +129,57 @@ export default function AdministratorsWorkspace({ initialAdministrators, initial
     }
   }
 
+  async function updateRole() {
+    if (!roleTarget) return;
+    const { administrator, role } = roleTarget;
+    setRolePendingUserId(administrator.userId);
+    setError("");
+    setSuccess("");
+    try {
+      const response = await fetch(`/api/core/admin/administrateurs/${administrator.userId}/role`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ role }),
+      });
+      const result = await response.json() as { member?: AdministratorMember; message?: string | string[] };
+      const messages = Array.isArray(result.message) ? result.message : [result.message];
+      if (!response.ok || !result.member) {
+        if (messages.includes("PROPRIETAIRE_PROTEGE")) throw new Error("Le rôle du propriétaire est protégé.");
+        if (messages.includes("ROLE_PROPRE_COMPTE_PROTEGE")) throw new Error("Vous ne pouvez pas modifier votre propre rôle.");
+        if (response.status === 403) throw new Error("Votre compte ne dispose pas du droit de modifier ce rôle.");
+        throw new Error("Le rôle n’a pas été modifié. Réessayez.");
+      }
+      setAdministrators((current) => current.map((item) => item.userId === result.member!.userId ? result.member! : item));
+      setDraftRoles((current) => ({ ...current, [result.member!.userId]: result.member!.role as ManagedRole }));
+      setSuccess(`Le rôle de ${administrator.displayName} est maintenant ${adminRoleLabel(result.member.role).toLowerCase()}.`);
+      setRoleTarget(null);
+    } catch (roleError) {
+      setError(roleError instanceof Error ? roleError.message : "Le rôle n’a pas été modifié.");
+    } finally {
+      setRolePendingUserId("");
+    }
+  }
+
   return (
     <div className="workspace">
       <section className="panel sensitive-admin-panel">
         <div className="sensitive-admin-heading">
           <p>ACCÈS SENSIBLE</p>
-          <h2>Inviter un administrateur</h2>
-          <span>Le nouveau compte disposera des mêmes droits d’administration, avec son propre mot de passe, son propre TOTP et sa propre session sécurisée.</span>
+          <h2>Inviter un administrateur ou un mainteneur</h2>
+          <span>L’administrateur gère les comptes et les opérations. Le mainteneur gère les pointages, sites et terminaux, sans pouvoir créer, bloquer ou supprimer des comptes.</span>
         </div>
         <form className="admin-form" onSubmit={submit}>
           <label>Nom complet<input name="displayName" required minLength={2} maxLength={100} autoComplete="name" /></label>
           <label>E-mail professionnel<input name="email" type="email" required autoComplete="email" /></label>
           <label>Matricule administrateur<input name="matricule" inputMode="numeric" autoComplete="off" required maxLength={11} pattern={MATRICULE_PATTERN} placeholder="000-000-000" title="Saisissez exactement 9 chiffres." onInput={(event) => { event.currentTarget.value = formatMatriculeInput(event.currentTarget.value); }} /></label>
-          <button className="danger-button" disabled={pending}>{pending ? "Création sécurisée…" : "Créer l’invitation administrateur"}</button>
+          <label>Rôle<select name="role" defaultValue="maintainer" required><option value="maintainer">Mainteneur — opérations uniquement</option><option value="administrator">Administrateur — tous les droits hors propriétaire</option></select></label>
+          <button className="danger-button" disabled={pending}>{pending ? "Création sécurisée…" : "Créer l’invitation"}</button>
         </form>
         {error ? <p className="form-message error-message" role="alert">{error}</p> : null}
         {success ? <p className="form-message success-message" role="status">{success}</p> : null}
         {invitationUrl ? (
           <section className="admin-invitation-panel" aria-labelledby="admin-invitation-title">
-            <p className="admin-invitation-kicker">LIEN D’INSCRIPTION ADMINISTRATEUR</p>
+            <p className="admin-invitation-kicker">LIEN D’INSCRIPTION SÉCURISÉ</p>
             <h3 id="admin-invitation-title">Invitation confidentielle à usage personnel</h3>
             <p>Transmettez ce lien temporaire uniquement à l’administrateur concerné. S’il expire, régénérez-le depuis la ligne du compte en attente.</p>
             <label htmlFor="administrator-invitation-link">Lien sécurisé</label>
@@ -150,11 +198,36 @@ export default function AdministratorsWorkspace({ initialAdministrators, initial
           <div className="table-wrap" tabIndex={0} role="region" aria-label="Tableau des administrateurs, défilement vertical et horizontal disponible">
             <table>
               <thead><tr><th>Nom</th><th>Matricule</th><th>E-mail</th><th>Rôle</th><th>État</th><th>Action</th></tr></thead>
-              <tbody>{administrators.map((administrator) => <tr key={administrator.userId}><td>{administrator.displayName}</td><td>{administrator.matricule}</td><td>{administrator.email}</td><td>{administrator.role === "owner" ? "Propriétaire" : "Administrateur"}</td><td><span className={`status-badge ${administrator.status}`}>{statusLabels[administrator.status]}</span></td><td>{administrator.role === "administrator" && administrator.status === "pending" ? <button className="secondary-button compact-button" type="button" disabled={Boolean(regeneratingUserId)} onClick={() => void regenerateInvitation(administrator)}>{regeneratingUserId === administrator.userId ? "Génération…" : "Régénérer le lien"}</button> : <span aria-label="Aucune action disponible">—</span>}</td></tr>)}</tbody>
+              <tbody>{administrators.map((administrator) => {
+                const isProtected = administrator.role === "owner" || administrator.userId === currentUserId;
+                const draftRole = administrator.role === "owner" ? null : (draftRoles[administrator.userId] ?? administrator.role);
+                return <tr key={administrator.userId}>
+                  <td>{administrator.displayName}</td>
+                  <td>{administrator.matricule}</td>
+                  <td>{administrator.email}</td>
+                  <td>{adminRoleLabel(administrator.role)}</td>
+                  <td><span className={`status-badge ${administrator.status}`}>{statusLabels[administrator.status]}</span></td>
+                  <td><div className="row-actions">
+                    {administrator.role !== "owner" && administrator.status === "pending" ? <button className="secondary-button compact-button" type="button" disabled={Boolean(regeneratingUserId) || Boolean(rolePendingUserId)} onClick={() => void regenerateInvitation(administrator)}>{regeneratingUserId === administrator.userId ? "Génération…" : "Régénérer le lien"}</button> : null}
+                    {!isProtected && draftRole ? <><select className="compact-role-select" aria-label={`Nouveau rôle de ${administrator.displayName}`} value={draftRole} disabled={Boolean(rolePendingUserId)} onChange={(event) => setDraftRoles((current) => ({ ...current, [administrator.userId]: event.target.value as ManagedRole }))}><option value="administrator">Administrateur</option><option value="maintainer">Mainteneur</option></select><button className="secondary-button compact-button" type="button" disabled={draftRole === administrator.role || Boolean(rolePendingUserId)} onClick={() => setRoleTarget({ administrator, role: draftRole })}>{rolePendingUserId === administrator.userId ? "Modification…" : "Changer le rôle"}</button></> : null}
+                    {isProtected && administrator.status !== "pending" ? <span className="protected-role-label">{administrator.role === "owner" ? "Rôle protégé" : "Votre compte"}</span> : null}
+                  </div></td>
+                </tr>;
+              })}</tbody>
             </table>
           </div>
         ) : <p>Aucun compte administrateur disponible.</p>}
       </section>
+      {roleTarget ? <ConfirmationDialog
+        title={`Changer le rôle de ${roleTarget.administrator.displayName} ?`}
+        description={roleTarget.role === "administrator"
+          ? "Ce compte pourra gérer les administrateurs et les employés, en plus de toutes les opérations de pointage. Le propriétaire restera protégé."
+          : "Ce compte conservera l’accès aux métriques, aux pointages, aux sites, aux terminaux et à ses paramètres, mais ne pourra plus gérer les comptes."}
+        confirmLabel={`Attribuer le rôle ${adminRoleLabel(roleTarget.role).toLowerCase()}`}
+        pending={rolePendingUserId === roleTarget.administrator.userId}
+        onCancel={() => setRoleTarget(null)}
+        onConfirm={() => void updateRole()}
+      /> : null}
     </div>
   );
 }

@@ -24,5 +24,5 @@ export default async function AdministratorsPage() {
     initialError = "Impossible de charger les comptes administrateurs.";
   }
 
-  return <AdminShell identity={auth.identity} activePath="/administrateurs" title="Administrateurs"><AdministratorsWorkspace initialAdministrators={administrators} initialError={initialError} /></AdminShell>;
+  return <AdminShell identity={auth.identity} activePath="/administrateurs" title="Administrateurs"><AdministratorsWorkspace initialAdministrators={administrators} currentUserId={auth.identity.userId} initialError={initialError} /></AdminShell>;
 }

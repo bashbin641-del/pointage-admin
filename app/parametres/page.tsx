@@ -10,9 +10,7 @@ export const instant = false;
 const roleLabels: Record<AdminRole, string> = {
   owner: "Propriétaire",
   administrator: "Administrateur",
-  moderator: "Modérateur",
-  editor: "Éditeur",
-  viewer: "Lecteur",
+  maintainer: "Mainteneur",
 };
 
 export default async function SettingsPage() {

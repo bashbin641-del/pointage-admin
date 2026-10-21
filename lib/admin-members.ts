@@ -3,7 +3,7 @@ export type AdministratorMember = {
   email: string;
   displayName: string;
   matricule: string;
-  role: "owner" | "administrator";
+  role: "owner" | "administrator" | "maintainer";
   status: "active" | "pending" | "blocked";
   createdAt: string;
 };
