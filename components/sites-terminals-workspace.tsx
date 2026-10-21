@@ -207,7 +207,7 @@ export default function SitesTerminalsWorkspace({ initialSites, initialTerminals
           <label>Nom du site<input name="name" required minLength={2} /></label>
           <button className="primary-button" disabled={pending}>Créer le site</button>
         </form>
-        <ul className="record-list">{sites.map((site) => <li key={site.id}><div><strong>{site.name}</strong><span>{site.active ? "Actif" : "Inactif"}</span></div>{canManage ? <button className="danger-button compact-button" type="button" disabled={deletePending} onClick={() => setDeleteTarget({ kind: "site", id: site.id, name: site.name })}>Supprimer le site</button> : null}</li>)}</ul>
+        <ul className="record-list" tabIndex={0} aria-label="Liste des sites, défilement vertical disponible">{sites.map((site) => <li key={site.id}><div><strong>{site.name}</strong><span>{site.active ? "Actif" : "Inactif"}</span></div>{canManage ? <button className="danger-button compact-button" type="button" disabled={deletePending} onClick={() => setDeleteTarget({ kind: "site", id: site.id, name: site.name })}>Supprimer le site</button> : null}</li>)}</ul>
       </section>
 
       <section className="panel">
@@ -245,7 +245,7 @@ export default function SitesTerminalsWorkspace({ initialSites, initialTerminals
           </section>
         ) : null}
 
-        <ul className="record-list terminal-list">{terminals.map((terminal) => {
+        <ul className="record-list terminal-list" tabIndex={0} aria-label="Liste des terminaux, défilement vertical disponible">{terminals.map((terminal) => {
           const sessionActive = Boolean(terminal.session_expires_at && new Date(terminal.session_expires_at).getTime() > now);
           const codePending = Boolean(terminal.activation_expires_at && new Date(terminal.activation_expires_at).getTime() > now);
           const codeExpired = Boolean(terminal.activation_expires_at && !codePending);

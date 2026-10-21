@@ -204,7 +204,7 @@ export default function AttendanceWorkspace({
         </div> : null}
         {items.length ? <p className="filter-summary" role="status">{filteredItems.length} résultat{filteredItems.length > 1 ? "s" : ""} sur {items.length} pointage{items.length > 1 ? "s" : ""}.</p> : null}
         {filteredItems.length ? (
-          <div className="table-wrap">
+          <div className="table-wrap" tabIndex={0} role="region" aria-label="Tableau des pointages, défilement vertical et horizontal disponible">
             <table>
               <thead><tr><th>Employé</th><th>Type</th><th>Date et heure</th><th>Site</th><th>Terminal</th>{canManage ? <th>Actions</th> : null}</tr></thead>
               <tbody>{filteredItems.map((item) => <tr key={item.id}><td>{item.employes?.display_name ?? "Compte indisponible"}<small>{item.employes?.matricule}</small></td><td>{item.event_type === "entree" ? "Entrée" : "Sortie"}</td><td>{new Intl.DateTimeFormat("fr-CI", { dateStyle: "medium", timeStyle: "short", timeZone: "Africa/Abidjan" }).format(new Date(item.occurred_at))}</td><td>{item.sites?.name ?? "—"}</td><td>{item.terminaux?.name ?? "—"}</td>{canManage ? <td><div className="row-actions"><button className="secondary-button compact-button" type="button" onClick={() => openEditor(item)} disabled={actionPending}>Modifier</button><button className="danger-button compact-button" type="button" onClick={() => setDeleteTarget({ kind: "single", event: item })} disabled={actionPending}>Supprimer</button></div></td> : null}</tr>)}</tbody>

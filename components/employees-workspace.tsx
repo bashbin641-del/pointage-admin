@@ -221,7 +221,7 @@ export default function EmployeesWorkspace({ initialEmployees, initialSites, emp
             </div>
             <p className="filter-summary" role="status">{filteredEmployees.length} résultat{filteredEmployees.length > 1 ? "s" : ""} sur {employees.length} employé{employees.length > 1 ? "s" : ""}.</p>
             {filteredEmployees.length ? (
-              <div className="table-wrap">
+              <div className="table-wrap" tabIndex={0} role="region" aria-label="Tableau des employés, défilement vertical et horizontal disponible">
                 <table>
                   <thead><tr><th>Nom</th><th>Matricule</th><th>Site</th><th>État</th>{canManage ? <th>Actions</th> : null}</tr></thead>
                   <tbody>{filteredEmployees.map((employee) => <tr key={employee.id}><td>{employee.display_name}</td><td>{employee.matricule}</td><td>{employee.sites?.name ?? "Non affecté"}</td><td><span className={`status-badge ${employee.active ? "active" : "blocked"}`}>{employee.active ? "Actif" : "Bloqué"}</span></td>{canManage ? <td><div className="row-actions"><button className="secondary-button compact-button" type="button" disabled={actionPending} onClick={() => setEmployeeAction({ kind: employee.active ? "block" : "unblock", employee })}>{employee.active ? "Bloquer" : "Réactiver"}</button><button className="danger-button compact-button" type="button" disabled={actionPending} onClick={() => setEmployeeAction({ kind: "delete", employee })}>Supprimer</button></div></td> : null}</tr>)}</tbody>
