@@ -24,6 +24,7 @@ const statusLabels: Record<AdministratorMember["status"], string> = {
 };
 
 const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Africa/Abidjan" }).format(new Date());
+const hiringDateFormatter = new Intl.DateTimeFormat("fr-CI", { dateStyle: "medium", timeZone: "UTC" });
 
 export default function AdministratorsWorkspace({ initialAdministrators, currentUserId, currentUserRole, initialError = "" }: Props) {
   const router = useRouter();
@@ -177,7 +178,7 @@ export default function AdministratorsWorkspace({ initialAdministrators, current
     }
   }
 
-  async function updateMatricule(matricule: string) {
+  async function updateMatricule(matricule: string, hiredAt: string) {
     if (!matriculeTarget) return;
     setMatriculePending(true);
     setMatriculeError("");
@@ -187,23 +188,24 @@ export default function AdministratorsWorkspace({ initialAdministrators, current
       const response = await fetch(`/api/core/admin/administrateurs/${matriculeTarget.userId}/matricule`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ matricule }),
+        body: JSON.stringify({ matricule, hiredAt }),
       });
       const result = await response.json() as { member?: AdministratorMember; message?: string | string[] };
       const messages = Array.isArray(result.message) ? result.message : [result.message];
       if (!response.ok || !result.member) {
         if (messages.includes("MATRICULE_DEJA_ATTRIBUE")) throw new Error("Ce matricule est déjà attribué à un autre compte administratif.");
-        if (messages.includes("MATRICULE_ADMINISTRATEUR_INVALIDE")) throw new Error(`Le matricule doit conserver l’année d’embauche ${matriculeTarget.hiredAt.slice(0, 4)}.`);
+        if (messages.includes("DATE_EMBAUCHE_INVALIDE")) throw new Error("La date d’embauche doit être comprise entre le 1er janvier 1900 et aujourd’hui.");
+        if (messages.includes("MATRICULE_ADMINISTRATEUR_INVALIDE")) throw new Error("L’année du matricule doit correspondre à la nouvelle date d’embauche.");
         if (messages.includes("PROPRIETAIRE_PROTEGE")) throw new Error("Seul le propriétaire peut modifier le matricule du propriétaire.");
-        if (response.status === 403) throw new Error("Seuls le propriétaire et les administrateurs peuvent modifier un matricule.");
-        throw new Error("Le matricule n’a pas été modifié. Réessayez.");
+        if (response.status === 403) throw new Error("Seuls le propriétaire et les administrateurs peuvent modifier ces informations.");
+        throw new Error("Les informations professionnelles n’ont pas été modifiées. Réessayez.");
       }
       setAdministrators((current) => current.map((administrator) => administrator.userId === result.member!.userId ? result.member! : administrator));
-      setSuccess(`Le matricule de ${matriculeTarget.displayName} est maintenant ${result.member.matricule}.`);
+      setSuccess(`Les informations professionnelles de ${matriculeTarget.displayName} ont été mises à jour.`);
       if (matriculeTarget.userId === currentUserId) router.refresh();
       setMatriculeTarget(null);
     } catch (updateError) {
-      setMatriculeError(updateError instanceof Error ? updateError.message : "Le matricule n’a pas été modifié.");
+      setMatriculeError(updateError instanceof Error ? updateError.message : "Les informations professionnelles n’ont pas été modifiées.");
     } finally {
       setMatriculePending(false);
     }
@@ -247,7 +249,7 @@ export default function AdministratorsWorkspace({ initialAdministrators, current
         {administrators.length ? (
           <div className="table-wrap" tabIndex={0} role="region" aria-label="Tableau des administrateurs, défilement vertical et horizontal disponible">
             <table>
-              <thead><tr><th>Nom</th><th>Matricule</th><th>E-mail</th><th>Rôle</th><th>État</th><th>Action</th></tr></thead>
+              <thead><tr><th>Nom</th><th>Matricule</th><th>Date d’embauche</th><th>E-mail</th><th>Rôle</th><th>État</th><th>Action</th></tr></thead>
               <tbody>{administrators.map((administrator) => {
                 const isProtected = administrator.role === "owner" || administrator.userId === currentUserId;
                 const canEditMatricule = administrator.role !== "owner" || currentUserRole === "owner";
@@ -255,12 +257,13 @@ export default function AdministratorsWorkspace({ initialAdministrators, current
                 return <tr key={administrator.userId}>
                   <td>{administrator.displayName}</td>
                   <td>{administrator.matricule}</td>
+                  <td>{hiringDateFormatter.format(new Date(`${administrator.hiredAt}T00:00:00Z`))}</td>
                   <td>{administrator.email}</td>
                   <td>{adminRoleLabel(administrator.role)}</td>
                   <td><span className={`status-badge ${administrator.status}`}>{statusLabels[administrator.status]}</span></td>
                   <td><div className="row-actions">
                     {administrator.role !== "owner" && administrator.status === "pending" ? <button className="secondary-button compact-button" type="button" disabled={Boolean(regeneratingUserId) || Boolean(rolePendingUserId) || matriculePending} onClick={() => void regenerateInvitation(administrator)}>{regeneratingUserId === administrator.userId ? "Génération…" : "Régénérer le lien"}</button> : null}
-                    {canEditMatricule ? <button className="secondary-button compact-button" type="button" disabled={Boolean(rolePendingUserId) || Boolean(regeneratingUserId) || matriculePending} onClick={() => { setMatriculeError(""); setMatriculeTarget(administrator); }}>Modifier le matricule</button> : null}
+                    {canEditMatricule ? <button className="secondary-button compact-button" type="button" disabled={Boolean(rolePendingUserId) || Boolean(regeneratingUserId) || matriculePending} onClick={() => { setMatriculeError(""); setMatriculeTarget(administrator); }}>Modifier les informations</button> : null}
                     {!isProtected && draftRole ? <><select className="compact-role-select" aria-label={`Nouveau rôle de ${administrator.displayName}`} value={draftRole} disabled={Boolean(rolePendingUserId) || matriculePending} onChange={(event) => setDraftRoles((current) => ({ ...current, [administrator.userId]: event.target.value as ManagedRole }))}><option value="administrator">Administrateur</option><option value="maintainer">Mainteneur</option></select><button className="secondary-button compact-button" type="button" disabled={draftRole === administrator.role || Boolean(rolePendingUserId) || matriculePending} onClick={() => setRoleTarget({ administrator, role: draftRole })}>{rolePendingUserId === administrator.userId ? "Modification…" : "Changer le rôle"}</button></> : null}
                     {isProtected && administrator.status !== "pending" ? <span className="protected-role-label">{administrator.role === "owner" ? "Rôle protégé" : "Votre compte"}</span> : null}
                   </div></td>
@@ -289,7 +292,7 @@ export default function AdministratorsWorkspace({ initialAdministrators, current
         error={matriculeError}
         onEdit={() => setMatriculeError("")}
         onCancel={() => { setMatriculeError(""); setMatriculeTarget(null); }}
-        onConfirm={(matricule) => void updateMatricule(matricule)}
+        onConfirm={(matricule, hiredAt) => void updateMatricule(matricule, hiredAt)}
       /> : null}
     </div>
   );

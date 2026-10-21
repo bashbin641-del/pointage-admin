@@ -35,6 +35,7 @@ const emptyFilters: EmployeeFilters = {
 };
 
 const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Africa/Abidjan" }).format(new Date());
+const hiringDateFormatter = new Intl.DateTimeFormat("fr-CI", { dateStyle: "medium", timeZone: "UTC" });
 
 function normalized(value: string) {
   return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase("fr").trim();
@@ -167,7 +168,7 @@ export default function EmployeesWorkspace({ initialEmployees, initialSites, emp
     }
   }
 
-  async function updateMatricule(matricule: string) {
+  async function updateMatricule(matricule: string, hiredAt: string) {
     if (!matriculeTarget) return;
     setMatriculePending(true);
     setMatriculeError("");
@@ -177,21 +178,22 @@ export default function EmployeesWorkspace({ initialEmployees, initialSites, emp
       const response = await fetch(`/api/core/admin/employes/${matriculeTarget.id}/matricule`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ matricule }),
+        body: JSON.stringify({ matricule, hiredAt }),
       });
       const result = await response.json() as { employee?: Employee; message?: string | string[] };
       const messages = Array.isArray(result.message) ? result.message : [result.message];
       if (!response.ok || !result.employee) {
         if (messages.includes("MATRICULE_DEJA_ATTRIBUE")) throw new Error("Ce matricule est déjà attribué à un autre employé.");
-        if (messages.includes("MATRICULE_EMPLOYE_INVALIDE")) throw new Error(`Le matricule doit conserver l’année d’embauche ${matriculeTarget.hired_at.slice(0, 4)}.`);
-        if (response.status === 403) throw new Error("Seuls le propriétaire et les administrateurs peuvent modifier un matricule.");
-        throw new Error("Le matricule n’a pas été modifié. Réessayez.");
+        if (messages.includes("DATE_EMBAUCHE_INVALIDE")) throw new Error("La date d’embauche doit être comprise entre le 1er janvier 1900 et aujourd’hui.");
+        if (messages.includes("MATRICULE_EMPLOYE_INVALIDE")) throw new Error("L’année du matricule doit correspondre à la nouvelle date d’embauche.");
+        if (response.status === 403) throw new Error("Seuls le propriétaire et les administrateurs peuvent modifier ces informations.");
+        throw new Error("Les informations professionnelles n’ont pas été modifiées. Réessayez.");
       }
-      setEmployees((current) => current.map((employee) => employee.id === matriculeTarget.id ? { ...employee, matricule: result.employee!.matricule } : employee));
-      setSuccess(`Le matricule de ${matriculeTarget.display_name} est maintenant ${result.employee.matricule}.`);
+      setEmployees((current) => current.map((employee) => employee.id === matriculeTarget.id ? { ...employee, matricule: result.employee!.matricule, hired_at: result.employee!.hired_at } : employee));
+      setSuccess(`Les informations professionnelles de ${matriculeTarget.display_name} ont été mises à jour.`);
       setMatriculeTarget(null);
     } catch (updateError) {
-      setMatriculeError(updateError instanceof Error ? updateError.message : "Le matricule n’a pas été modifié.");
+      setMatriculeError(updateError instanceof Error ? updateError.message : "Les informations professionnelles n’ont pas été modifiées.");
     } finally {
       setMatriculePending(false);
     }
@@ -299,8 +301,8 @@ export default function EmployeesWorkspace({ initialEmployees, initialSites, emp
             {filteredEmployees.length ? (
               <div className="table-wrap" tabIndex={0} role="region" aria-label="Tableau des employés, défilement vertical et horizontal disponible">
                 <table>
-                  <thead><tr><th>Nom</th><th>Matricule</th><th>Site</th><th>État</th>{canManage ? <th>Actions</th> : null}</tr></thead>
-                  <tbody>{filteredEmployees.map((employee) => <tr key={employee.id}><td>{employee.display_name}</td><td>{employee.matricule}</td><td>{employee.sites?.name ?? "Non affecté"}</td><td><span className={`status-badge ${employee.status}`}>{employee.status === "active" ? "Actif" : employee.status === "pending" ? "Invitation en attente" : "Bloqué"}</span></td>{canManage ? <td><div className="row-actions">{employee.status === "pending" ? <button className="secondary-button compact-button" type="button" disabled={Boolean(regeneratingEmployeeId) || actionPending || matriculePending} onClick={() => void regenerateInvitation(employee)}>{regeneratingEmployeeId === employee.id ? "Génération…" : "Régénérer le lien"}</button> : null}<button className="secondary-button compact-button" type="button" disabled={actionPending || Boolean(regeneratingEmployeeId) || matriculePending} onClick={() => { setMatriculeError(""); setMatriculeTarget(employee); }}>Modifier le matricule</button><button className="secondary-button compact-button" type="button" disabled={actionPending || Boolean(regeneratingEmployeeId) || matriculePending} onClick={() => setEmployeeAction({ kind: employee.active ? "block" : "unblock", employee })}>{employee.active ? "Bloquer" : "Réactiver"}</button><button className="danger-button compact-button" type="button" disabled={actionPending || Boolean(regeneratingEmployeeId) || matriculePending} onClick={() => setEmployeeAction({ kind: "delete", employee })}>Supprimer</button></div></td> : null}</tr>)}</tbody>
+                  <thead><tr><th>Nom</th><th>Matricule</th><th>Date d’embauche</th><th>Site</th><th>État</th>{canManage ? <th>Actions</th> : null}</tr></thead>
+                  <tbody>{filteredEmployees.map((employee) => <tr key={employee.id}><td>{employee.display_name}</td><td>{employee.matricule}</td><td>{hiringDateFormatter.format(new Date(`${employee.hired_at}T00:00:00Z`))}</td><td>{employee.sites?.name ?? "Non affecté"}</td><td><span className={`status-badge ${employee.status}`}>{employee.status === "active" ? "Actif" : employee.status === "pending" ? "Invitation en attente" : "Bloqué"}</span></td>{canManage ? <td><div className="row-actions">{employee.status === "pending" ? <button className="secondary-button compact-button" type="button" disabled={Boolean(regeneratingEmployeeId) || actionPending || matriculePending} onClick={() => void regenerateInvitation(employee)}>{regeneratingEmployeeId === employee.id ? "Génération…" : "Régénérer le lien"}</button> : null}<button className="secondary-button compact-button" type="button" disabled={actionPending || Boolean(regeneratingEmployeeId) || matriculePending} onClick={() => { setMatriculeError(""); setMatriculeTarget(employee); }}>Modifier les informations</button><button className="secondary-button compact-button" type="button" disabled={actionPending || Boolean(regeneratingEmployeeId) || matriculePending} onClick={() => setEmployeeAction({ kind: employee.active ? "block" : "unblock", employee })}>{employee.active ? "Bloquer" : "Réactiver"}</button><button className="danger-button compact-button" type="button" disabled={actionPending || Boolean(regeneratingEmployeeId) || matriculePending} onClick={() => setEmployeeAction({ kind: "delete", employee })}>Supprimer</button></div></td> : null}</tr>)}</tbody>
                 </table>
               </div>
             ) : <p>Aucun employé ne correspond aux filtres sélectionnés.</p>}
@@ -328,7 +330,7 @@ export default function EmployeesWorkspace({ initialEmployees, initialSites, emp
         error={matriculeError}
         onEdit={() => setMatriculeError("")}
         onCancel={() => { setMatriculeError(""); setMatriculeTarget(null); }}
-        onConfirm={(matricule) => void updateMatricule(matricule)}
+        onConfirm={(matricule, hiredAt) => void updateMatricule(matricule, hiredAt)}
       /> : null}
     </div>
   );
