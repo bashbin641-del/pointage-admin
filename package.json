@@ -12,6 +12,7 @@
   "dependencies": {
     "@supabase/ssr": "^0.7.0",
     "@supabase/supabase-js": "^2.75.0",
+    "jspdf": "4.2.1",
     "next": "16.4.2",
     "qrcode.react": "^4.2.0",
     "react": "19.3.0",
