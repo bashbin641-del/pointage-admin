@@ -3,6 +3,7 @@
 import { useCallback, useMemo, useState } from "react";
 import CompactDataLoader from "@/components/compact-data-loader";
 import ConfirmationDialog from "@/components/confirmation-dialog";
+import MatriculeEditDialog from "@/components/matricule-edit-dialog";
 import { EMPLOYEE_MATRICULE_PATTERN, formatMatriculeInput } from "@/lib/matricule";
 import { useAdminRealtime } from "@/lib/use-admin-realtime";
 
@@ -51,6 +52,9 @@ export default function EmployeesWorkspace({ initialEmployees, initialSites, emp
   const [employeeAction, setEmployeeAction] = useState<EmployeeAction | null>(null);
   const [actionPending, setActionPending] = useState(false);
   const [regeneratingEmployeeId, setRegeneratingEmployeeId] = useState("");
+  const [matriculeTarget, setMatriculeTarget] = useState<Employee | null>(null);
+  const [matriculePending, setMatriculePending] = useState(false);
+  const [matriculeError, setMatriculeError] = useState("");
   const [filters, setFilters] = useState<EmployeeFilters>(emptyFilters);
 
   const filteredEmployees = useMemo(() => {
@@ -163,6 +167,36 @@ export default function EmployeesWorkspace({ initialEmployees, initialSites, emp
     }
   }
 
+  async function updateMatricule(matricule: string) {
+    if (!matriculeTarget) return;
+    setMatriculePending(true);
+    setMatriculeError("");
+    setError("");
+    setSuccess("");
+    try {
+      const response = await fetch(`/api/core/admin/employes/${matriculeTarget.id}/matricule`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ matricule }),
+      });
+      const result = await response.json() as { employee?: Employee; message?: string | string[] };
+      const messages = Array.isArray(result.message) ? result.message : [result.message];
+      if (!response.ok || !result.employee) {
+        if (messages.includes("MATRICULE_DEJA_ATTRIBUE")) throw new Error("Ce matricule est déjà attribué à un autre employé.");
+        if (messages.includes("MATRICULE_EMPLOYE_INVALIDE")) throw new Error(`Le matricule doit conserver l’année d’embauche ${matriculeTarget.hired_at.slice(0, 4)}.`);
+        if (response.status === 403) throw new Error("Seuls le propriétaire et les administrateurs peuvent modifier un matricule.");
+        throw new Error("Le matricule n’a pas été modifié. Réessayez.");
+      }
+      setEmployees((current) => current.map((employee) => employee.id === matriculeTarget.id ? { ...employee, matricule: result.employee!.matricule } : employee));
+      setSuccess(`Le matricule de ${matriculeTarget.display_name} est maintenant ${result.employee.matricule}.`);
+      setMatriculeTarget(null);
+    } catch (updateError) {
+      setMatriculeError(updateError instanceof Error ? updateError.message : "Le matricule n’a pas été modifié.");
+    } finally {
+      setMatriculePending(false);
+    }
+  }
+
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const formElement = event.currentTarget;
@@ -266,7 +300,7 @@ export default function EmployeesWorkspace({ initialEmployees, initialSites, emp
               <div className="table-wrap" tabIndex={0} role="region" aria-label="Tableau des employés, défilement vertical et horizontal disponible">
                 <table>
                   <thead><tr><th>Nom</th><th>Matricule</th><th>Site</th><th>État</th>{canManage ? <th>Actions</th> : null}</tr></thead>
-                  <tbody>{filteredEmployees.map((employee) => <tr key={employee.id}><td>{employee.display_name}</td><td>{employee.matricule}</td><td>{employee.sites?.name ?? "Non affecté"}</td><td><span className={`status-badge ${employee.status}`}>{employee.status === "active" ? "Actif" : employee.status === "pending" ? "Invitation en attente" : "Bloqué"}</span></td>{canManage ? <td><div className="row-actions">{employee.status === "pending" ? <button className="secondary-button compact-button" type="button" disabled={Boolean(regeneratingEmployeeId) || actionPending} onClick={() => void regenerateInvitation(employee)}>{regeneratingEmployeeId === employee.id ? "Génération…" : "Régénérer le lien"}</button> : null}<button className="secondary-button compact-button" type="button" disabled={actionPending || Boolean(regeneratingEmployeeId)} onClick={() => setEmployeeAction({ kind: employee.active ? "block" : "unblock", employee })}>{employee.active ? "Bloquer" : "Réactiver"}</button><button className="danger-button compact-button" type="button" disabled={actionPending || Boolean(regeneratingEmployeeId)} onClick={() => setEmployeeAction({ kind: "delete", employee })}>Supprimer</button></div></td> : null}</tr>)}</tbody>
+                  <tbody>{filteredEmployees.map((employee) => <tr key={employee.id}><td>{employee.display_name}</td><td>{employee.matricule}</td><td>{employee.sites?.name ?? "Non affecté"}</td><td><span className={`status-badge ${employee.status}`}>{employee.status === "active" ? "Actif" : employee.status === "pending" ? "Invitation en attente" : "Bloqué"}</span></td>{canManage ? <td><div className="row-actions">{employee.status === "pending" ? <button className="secondary-button compact-button" type="button" disabled={Boolean(regeneratingEmployeeId) || actionPending || matriculePending} onClick={() => void regenerateInvitation(employee)}>{regeneratingEmployeeId === employee.id ? "Génération…" : "Régénérer le lien"}</button> : null}<button className="secondary-button compact-button" type="button" disabled={actionPending || Boolean(regeneratingEmployeeId) || matriculePending} onClick={() => { setMatriculeError(""); setMatriculeTarget(employee); }}>Modifier le matricule</button><button className="secondary-button compact-button" type="button" disabled={actionPending || Boolean(regeneratingEmployeeId) || matriculePending} onClick={() => setEmployeeAction({ kind: employee.active ? "block" : "unblock", employee })}>{employee.active ? "Bloquer" : "Réactiver"}</button><button className="danger-button compact-button" type="button" disabled={actionPending || Boolean(regeneratingEmployeeId) || matriculePending} onClick={() => setEmployeeAction({ kind: "delete", employee })}>Supprimer</button></div></td> : null}</tr>)}</tbody>
                 </table>
               </div>
             ) : <p>Aucun employé ne correspond aux filtres sélectionnés.</p>}
@@ -284,6 +318,17 @@ export default function EmployeesWorkspace({ initialEmployees, initialSites, emp
         pending={actionPending}
         onCancel={() => setEmployeeAction(null)}
         onConfirm={() => void applyEmployeeAction()}
+      /> : null}
+      {matriculeTarget ? <MatriculeEditDialog
+        kind="employee"
+        subjectName={matriculeTarget.display_name}
+        currentMatricule={matriculeTarget.matricule}
+        hiredAt={matriculeTarget.hired_at}
+        pending={matriculePending}
+        error={matriculeError}
+        onEdit={() => setMatriculeError("")}
+        onCancel={() => { setMatriculeError(""); setMatriculeTarget(null); }}
+        onConfirm={(matricule) => void updateMatricule(matricule)}
       /> : null}
     </div>
   );
