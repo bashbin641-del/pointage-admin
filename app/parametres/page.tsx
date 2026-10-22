@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { connection } from "next/server";
 import AdminShell from "@/components/admin-shell";
 import AdminPasswordSettings from "@/components/admin-password-settings";
+import AdminEmailSettings from "@/components/admin-email-settings";
 import { authenticateAdmin } from "@/lib/auth/server";
 import type { AdminRole } from "@/lib/auth/types";
 
@@ -33,6 +34,7 @@ export default async function SettingsPage() {
             <div><dt>Rôle</dt><dd>{roleLabels[auth.identity.role]}</dd></div>
           </dl>
         </section>
+        <AdminEmailSettings email={auth.identity.email} />
         <AdminPasswordSettings email={auth.identity.email} />
       </div>
     </AdminShell>

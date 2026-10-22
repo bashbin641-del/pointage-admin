@@ -4,6 +4,7 @@ import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import ConfirmationDialog from "@/components/confirmation-dialog";
 import MatriculeEditDialog from "@/components/matricule-edit-dialog";
+import EmailChangeRequestDialog from "@/components/email-change-request-dialog";
 import type { AdministratorMember } from "@/lib/admin-members";
 import { adminRoleLabel, type AdminRole } from "@/lib/auth/types";
 import { ADMIN_MATRICULE_PATTERN, formatMatriculeInput } from "@/lib/matricule";
@@ -43,6 +44,9 @@ export default function AdministratorsWorkspace({ initialAdministrators, current
   const [matriculeError, setMatriculeError] = useState("");
   const [administratorAction, setAdministratorAction] = useState<AdministratorAction | null>(null);
   const [actionPending, setActionPending] = useState(false);
+  const [emailTarget, setEmailTarget] = useState<AdministratorMember | null>(null);
+  const [emailPending, setEmailPending] = useState(false);
+  const [emailError, setEmailError] = useState("");
   const [draftRoles, setDraftRoles] = useState<Record<string, ManagedRole>>(() => Object.fromEntries(
     initialAdministrators
       .filter((administrator): administrator is AdministratorMember & { role: ManagedRole } => administrator.role !== "owner")
@@ -258,6 +262,39 @@ export default function AdministratorsWorkspace({ initialAdministrators, current
     }
   }
 
+  async function requestEmailChange(newEmail: string) {
+    if (!emailTarget) return;
+    setEmailPending(true);
+    setEmailError("");
+    setError("");
+    setSuccess("");
+    try {
+      const response = await fetch(`/api/core/admin/administrateurs/${emailTarget.userId}/changement-email`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ newEmail }),
+      });
+      const result = await response.json() as { request?: { newEmail: string }; message?: string | string[] };
+      const messages = Array.isArray(result.message) ? result.message : [result.message];
+      if (!response.ok || !result.request) {
+        if (messages.includes("EMAIL_DEJA_UTILISE") || messages.includes("EMAIL_DEJA_EN_ATTENTE")) throw new Error("Cette adresse est déjà utilisée ou réservée.");
+        if (messages.includes("EMAIL_ADMINISTRATEUR_INOX_REQUIS")) throw new Error("Une adresse professionnelle se terminant par @inox.ci est obligatoire.");
+        if (messages.includes("PROPRIETAIRE_PROTEGE")) throw new Error("L’adresse du propriétaire ne peut être modifiée que depuis son propre compte.");
+        if (response.status === 403) throw new Error("Seul le propriétaire peut créer cette demande pour un autre compte administratif.");
+        throw new Error("La demande n’a pas été créée. Réessayez.");
+      }
+      setAdministrators((current) => current.map((item) => item.userId === emailTarget.userId
+        ? { ...item, emailChange: { new_email: result.request!.newEmail, status: "pending_target", expires_at: new Date(Date.now() + 30 * 60_000).toISOString() } }
+        : item));
+      setSuccess(`La demande a été créée pour ${emailTarget.displayName}. Cette personne devra la confirmer avec son TOTP.`);
+      setEmailTarget(null);
+    } catch (requestError) {
+      setEmailError(requestError instanceof Error ? requestError.message : "La demande n’a pas été créée.");
+    } finally {
+      setEmailPending(false);
+    }
+  }
+
   return (
     <div className="workspace">
       <section className="panel sensitive-admin-panel">
@@ -305,12 +342,13 @@ export default function AdministratorsWorkspace({ initialAdministrators, current
                   <td>{administrator.displayName}</td>
                   <td>{administrator.matricule}</td>
                   <td>{hiringDateFormatter.format(new Date(`${administrator.hiredAt}T00:00:00Z`))}</td>
-                  <td>{administrator.email}</td>
+                  <td>{administrator.email}{administrator.emailChange ? <small className="pending-email-label">Nouvelle adresse en attente : {administrator.emailChange.new_email}</small> : null}</td>
                   <td>{adminRoleLabel(administrator.role)}</td>
                   <td><span className={`status-badge ${administrator.status}`}>{statusLabels[administrator.status]}</span></td>
                   <td><div className="row-actions">
                     {administrator.role !== "owner" && administrator.status === "pending" ? <button className="secondary-button compact-button" type="button" disabled={Boolean(regeneratingUserId) || Boolean(rolePendingUserId) || matriculePending || actionPending} onClick={() => void regenerateInvitation(administrator)}>{regeneratingUserId === administrator.userId ? "Génération…" : "Régénérer le lien"}</button> : null}
                     {canEditMatricule ? <button className="secondary-button compact-button" type="button" disabled={Boolean(rolePendingUserId) || Boolean(regeneratingUserId) || matriculePending || actionPending} onClick={() => { setMatriculeError(""); setMatriculeTarget(administrator); }}>Modifier les informations</button> : null}
+                    {currentUserRole === "owner" && !isProtected && administrator.status !== "blocked" ? <button className="secondary-button compact-button" type="button" disabled={emailPending || actionPending || matriculePending} onClick={() => { setEmailError(""); setEmailTarget(administrator); }}>{administrator.emailChange ? "Remplacer la demande e-mail" : "Modifier l’e-mail"}</button> : null}
                     {!isProtected && draftRole ? <><select className="compact-role-select" aria-label={`Nouveau rôle de ${administrator.displayName}`} value={draftRole} disabled={Boolean(rolePendingUserId) || matriculePending || actionPending} onChange={(event) => setDraftRoles((current) => ({ ...current, [administrator.userId]: event.target.value as ManagedRole }))}><option value="administrator">Administrateur</option><option value="maintainer">Mainteneur</option></select><button className="secondary-button compact-button" type="button" disabled={draftRole === administrator.role || Boolean(rolePendingUserId) || matriculePending || actionPending} onClick={() => setRoleTarget({ administrator, role: draftRole })}>{rolePendingUserId === administrator.userId ? "Modification…" : "Changer le rôle"}</button></> : null}
                     {currentUserRole === "owner" && !isProtected ? <><button className="secondary-button compact-button" type="button" disabled={actionPending || Boolean(rolePendingUserId) || matriculePending} onClick={() => setAdministratorAction({ kind: administrator.status === "blocked" ? "unblock" : "block", administrator })}>{administrator.status === "blocked" ? "Réactiver" : "Bloquer"}</button><button className="danger-button compact-button" type="button" disabled={actionPending || Boolean(rolePendingUserId) || matriculePending} onClick={() => setAdministratorAction({ kind: "delete", administrator })}>Supprimer</button></> : null}
                     {isProtected && administrator.status !== "pending" ? <span className="protected-role-label">{administrator.role === "owner" ? "Rôle protégé" : "Votre compte"}</span> : null}
@@ -353,6 +391,15 @@ export default function AdministratorsWorkspace({ initialAdministrators, current
         onEdit={() => setMatriculeError("")}
         onCancel={() => { setMatriculeError(""); setMatriculeTarget(null); }}
         onConfirm={(matricule, hiredAt) => void updateMatricule(matricule, hiredAt)}
+      /> : null}
+      {emailTarget ? <EmailChangeRequestDialog
+        subjectName={emailTarget.displayName}
+        currentEmail={emailTarget.email}
+        requireInoxDomain
+        pending={emailPending}
+        error={emailError}
+        onCancel={() => { setEmailError(""); setEmailTarget(null); }}
+        onConfirm={(newEmail) => void requestEmailChange(newEmail)}
       /> : null}
     </div>
   );

@@ -4,12 +4,13 @@ import { useCallback, useMemo, useState } from "react";
 import CompactDataLoader from "@/components/compact-data-loader";
 import ConfirmationDialog from "@/components/confirmation-dialog";
 import MatriculeEditDialog from "@/components/matricule-edit-dialog";
+import EmailChangeRequestDialog from "@/components/email-change-request-dialog";
 import { EMPLOYEE_MATRICULE_PATTERN, formatMatriculeInput } from "@/lib/matricule";
 import { useAdminRealtime } from "@/lib/use-admin-realtime";
 
 type Site = { id: string; name: string; active: boolean };
 type EmployeeStatus = "active" | "pending" | "blocked";
-type Employee = { id: string; matricule: string; hired_at: string; display_name: string; email: string; active: boolean; status: EmployeeStatus; sites: { name: string } | null };
+type Employee = { id: string; matricule: string; hired_at: string; display_name: string; email: string; active: boolean; status: EmployeeStatus; sites: { name: string } | null; emailChange?: { new_email: string; status: "pending_target" | "awaiting_confirmations"; expires_at: string } | null };
 
 type Props = {
   initialEmployees: Employee[];
@@ -56,6 +57,9 @@ export default function EmployeesWorkspace({ initialEmployees, initialSites, emp
   const [matriculeTarget, setMatriculeTarget] = useState<Employee | null>(null);
   const [matriculePending, setMatriculePending] = useState(false);
   const [matriculeError, setMatriculeError] = useState("");
+  const [emailTarget, setEmailTarget] = useState<Employee | null>(null);
+  const [emailPending, setEmailPending] = useState(false);
+  const [emailError, setEmailError] = useState("");
   const [filters, setFilters] = useState<EmployeeFilters>(emptyFilters);
 
   const filteredEmployees = useMemo(() => {
@@ -199,6 +203,36 @@ export default function EmployeesWorkspace({ initialEmployees, initialSites, emp
     }
   }
 
+  async function requestEmailChange(newEmail: string) {
+    if (!emailTarget) return;
+    setEmailPending(true);
+    setEmailError("");
+    setError("");
+    setSuccess("");
+    try {
+      const response = await fetch(`/api/core/admin/employes/${emailTarget.id}/changement-email`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ newEmail }),
+      });
+      const result = await response.json() as { request?: { newEmail: string }; message?: string | string[] };
+      const messages = Array.isArray(result.message) ? result.message : [result.message];
+      if (!response.ok || !result.request) {
+        if (messages.includes("EMAIL_DEJA_UTILISE") || messages.includes("EMAIL_DEJA_EN_ATTENTE")) throw new Error("Cette adresse est déjà utilisée ou réservée.");
+        if (messages.includes("COMPTE_EMPLOYE_INACTIF")) throw new Error("Réactivez le compte avant de modifier son adresse.");
+        if (response.status === 403) throw new Error("Seuls le propriétaire et les administrateurs peuvent créer cette demande.");
+        throw new Error("La demande n’a pas été créée. Réessayez.");
+      }
+      setSuccess(`La demande a été créée pour ${emailTarget.display_name}. L’employé devra l’accepter depuis ses paramètres.`);
+      setEmailTarget(null);
+      await load(true);
+    } catch (requestError) {
+      setEmailError(requestError instanceof Error ? requestError.message : "La demande n’a pas été créée.");
+    } finally {
+      setEmailPending(false);
+    }
+  }
+
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const formElement = event.currentTarget;
@@ -301,8 +335,8 @@ export default function EmployeesWorkspace({ initialEmployees, initialSites, emp
             {filteredEmployees.length ? (
               <div className="table-wrap" tabIndex={0} role="region" aria-label="Tableau des employés, défilement vertical et horizontal disponible">
                 <table>
-                  <thead><tr><th>Nom</th><th>Matricule</th><th>Date d’embauche</th><th>Site</th><th>État</th>{canManage ? <th>Actions</th> : null}</tr></thead>
-                  <tbody>{filteredEmployees.map((employee) => <tr key={employee.id}><td>{employee.display_name}</td><td>{employee.matricule}</td><td>{hiringDateFormatter.format(new Date(`${employee.hired_at}T00:00:00Z`))}</td><td>{employee.sites?.name ?? "Non affecté"}</td><td><span className={`status-badge ${employee.status}`}>{employee.status === "active" ? "Actif" : employee.status === "pending" ? "Invitation en attente" : "Bloqué"}</span></td>{canManage ? <td><div className="row-actions">{employee.status === "pending" ? <button className="secondary-button compact-button" type="button" disabled={Boolean(regeneratingEmployeeId) || actionPending || matriculePending} onClick={() => void regenerateInvitation(employee)}>{regeneratingEmployeeId === employee.id ? "Génération…" : "Régénérer le lien"}</button> : null}<button className="secondary-button compact-button" type="button" disabled={actionPending || Boolean(regeneratingEmployeeId) || matriculePending} onClick={() => { setMatriculeError(""); setMatriculeTarget(employee); }}>Modifier les informations</button><button className="secondary-button compact-button" type="button" disabled={actionPending || Boolean(regeneratingEmployeeId) || matriculePending} onClick={() => setEmployeeAction({ kind: employee.active ? "block" : "unblock", employee })}>{employee.active ? "Bloquer" : "Réactiver"}</button><button className="danger-button compact-button" type="button" disabled={actionPending || Boolean(regeneratingEmployeeId) || matriculePending} onClick={() => setEmployeeAction({ kind: "delete", employee })}>Supprimer</button></div></td> : null}</tr>)}</tbody>
+                  <thead><tr><th>Nom</th><th>Matricule</th><th>Date d’embauche</th><th>E-mail</th><th>Site</th><th>État</th>{canManage ? <th>Actions</th> : null}</tr></thead>
+                  <tbody>{filteredEmployees.map((employee) => <tr key={employee.id}><td>{employee.display_name}</td><td>{employee.matricule}</td><td>{hiringDateFormatter.format(new Date(`${employee.hired_at}T00:00:00Z`))}</td><td>{employee.email}{employee.emailChange ? <small className="pending-email-label">Nouvelle adresse en attente : {employee.emailChange.new_email}</small> : null}</td><td>{employee.sites?.name ?? "Non affecté"}</td><td><span className={`status-badge ${employee.status}`}>{employee.status === "active" ? "Actif" : employee.status === "pending" ? "Invitation en attente" : "Bloqué"}</span></td>{canManage ? <td><div className="row-actions">{employee.status === "pending" ? <button className="secondary-button compact-button" type="button" disabled={Boolean(regeneratingEmployeeId) || actionPending || matriculePending || emailPending} onClick={() => void regenerateInvitation(employee)}>{regeneratingEmployeeId === employee.id ? "Génération…" : "Régénérer le lien"}</button> : null}<button className="secondary-button compact-button" type="button" disabled={actionPending || Boolean(regeneratingEmployeeId) || matriculePending || emailPending} onClick={() => { setMatriculeError(""); setMatriculeTarget(employee); }}>Modifier les informations</button><button className="secondary-button compact-button" type="button" disabled={!employee.active || actionPending || matriculePending || emailPending} onClick={() => { setEmailError(""); setEmailTarget(employee); }}>{employee.emailChange ? "Remplacer la demande e-mail" : "Modifier l’e-mail"}</button><button className="secondary-button compact-button" type="button" disabled={actionPending || Boolean(regeneratingEmployeeId) || matriculePending || emailPending} onClick={() => setEmployeeAction({ kind: employee.active ? "block" : "unblock", employee })}>{employee.active ? "Bloquer" : "Réactiver"}</button><button className="danger-button compact-button" type="button" disabled={actionPending || Boolean(regeneratingEmployeeId) || matriculePending || emailPending} onClick={() => setEmployeeAction({ kind: "delete", employee })}>Supprimer</button></div></td> : null}</tr>)}</tbody>
                 </table>
               </div>
             ) : <p>Aucun employé ne correspond aux filtres sélectionnés.</p>}
@@ -331,6 +365,14 @@ export default function EmployeesWorkspace({ initialEmployees, initialSites, emp
         onEdit={() => setMatriculeError("")}
         onCancel={() => { setMatriculeError(""); setMatriculeTarget(null); }}
         onConfirm={(matricule, hiredAt) => void updateMatricule(matricule, hiredAt)}
+      /> : null}
+      {emailTarget ? <EmailChangeRequestDialog
+        subjectName={emailTarget.display_name}
+        currentEmail={emailTarget.email}
+        pending={emailPending}
+        error={emailError}
+        onCancel={() => { setEmailError(""); setEmailTarget(null); }}
+        onConfirm={(newEmail) => void requestEmailChange(newEmail)}
       /> : null}
     </div>
   );
