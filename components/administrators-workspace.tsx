@@ -16,6 +16,7 @@ type Props = {
 };
 
 type ManagedRole = "administrator" | "maintainer";
+type AdministratorAction = { kind: "block" | "unblock" | "delete"; administrator: AdministratorMember };
 
 const statusLabels: Record<AdministratorMember["status"], string> = {
   active: "Actif",
@@ -40,6 +41,8 @@ export default function AdministratorsWorkspace({ initialAdministrators, current
   const [matriculeTarget, setMatriculeTarget] = useState<AdministratorMember | null>(null);
   const [matriculePending, setMatriculePending] = useState(false);
   const [matriculeError, setMatriculeError] = useState("");
+  const [administratorAction, setAdministratorAction] = useState<AdministratorAction | null>(null);
+  const [actionPending, setActionPending] = useState(false);
   const [draftRoles, setDraftRoles] = useState<Record<string, ManagedRole>>(() => Object.fromEntries(
     initialAdministrators
       .filter((administrator): administrator is AdministratorMember & { role: ManagedRole } => administrator.role !== "owner")
@@ -211,6 +214,50 @@ export default function AdministratorsWorkspace({ initialAdministrators, current
     }
   }
 
+  async function applyAdministratorAction() {
+    if (!administratorAction) return;
+    const { administrator, kind } = administratorAction;
+    const deleting = kind === "delete";
+    setActionPending(true);
+    setError("");
+    setSuccess("");
+    try {
+      const response = await fetch(`/api/core/admin/administrateurs/${administrator.userId}${deleting ? "" : "/status"}`, {
+        method: deleting ? "DELETE" : "PATCH",
+        headers: deleting ? undefined : { "Content-Type": "application/json" },
+        body: deleting ? undefined : JSON.stringify({ active: kind === "unblock" }),
+      });
+      const result = await response.json() as { deleted?: boolean; member?: AdministratorMember; message?: string | string[] };
+      const messages = Array.isArray(result.message) ? result.message : [result.message];
+      if (!response.ok || (deleting ? !result.deleted : !result.member)) {
+        if (messages.includes("PROPRIETAIRE_PROTEGE")) throw new Error("Le compte propriétaire est protégé.");
+        if (messages.includes("COMPTE_PROPRE_PROTEGE")) throw new Error("Le propriétaire ne peut pas bloquer ou supprimer son propre compte.");
+        if (response.status === 403) throw new Error("Seul le propriétaire peut bloquer ou supprimer un compte administratif.");
+        throw new Error(deleting ? "Le compte n’a pas été supprimé. Réessayez." : "L’état du compte n’a pas été modifié. Réessayez.");
+      }
+
+      if (deleting) {
+        setAdministrators((current) => current.filter((item) => item.userId !== administrator.userId));
+        setDraftRoles((current) => {
+          const next = { ...current };
+          delete next[administrator.userId];
+          return next;
+        });
+        setSuccess(`${administrator.displayName} et son accès administratif ont été supprimés définitivement.`);
+      } else {
+        setAdministrators((current) => current.map((item) => item.userId === result.member!.userId ? result.member! : item));
+        setSuccess(kind === "block"
+          ? `${administrator.displayName} est bloqué. Ses sessions et ses nouveaux accès sont refusés.`
+          : `${administrator.displayName} peut de nouveau accéder à l’administration après authentification sécurisée.`);
+      }
+      setAdministratorAction(null);
+    } catch (actionError) {
+      setError(actionError instanceof Error ? actionError.message : "L’opération n’a pas été confirmée.");
+    } finally {
+      setActionPending(false);
+    }
+  }
+
   return (
     <div className="workspace">
       <section className="panel sensitive-admin-panel">
@@ -249,7 +296,7 @@ export default function AdministratorsWorkspace({ initialAdministrators, current
         {administrators.length ? (
           <div className="table-wrap" tabIndex={0} role="region" aria-label="Tableau des administrateurs, défilement vertical et horizontal disponible">
             <table>
-              <thead><tr><th>Nom</th><th>Matricule</th><th>Date d’embauche</th><th>E-mail</th><th>Rôle</th><th>État</th><th>Action</th></tr></thead>
+              <thead><tr><th>Nom</th><th>Matricule</th><th>Date d’embauche</th><th>E-mail</th><th>Rôle</th><th>État</th><th>Actions</th></tr></thead>
               <tbody>{administrators.map((administrator) => {
                 const isProtected = administrator.role === "owner" || administrator.userId === currentUserId;
                 const canEditMatricule = administrator.role !== "owner" || currentUserRole === "owner";
@@ -262,9 +309,10 @@ export default function AdministratorsWorkspace({ initialAdministrators, current
                   <td>{adminRoleLabel(administrator.role)}</td>
                   <td><span className={`status-badge ${administrator.status}`}>{statusLabels[administrator.status]}</span></td>
                   <td><div className="row-actions">
-                    {administrator.role !== "owner" && administrator.status === "pending" ? <button className="secondary-button compact-button" type="button" disabled={Boolean(regeneratingUserId) || Boolean(rolePendingUserId) || matriculePending} onClick={() => void regenerateInvitation(administrator)}>{regeneratingUserId === administrator.userId ? "Génération…" : "Régénérer le lien"}</button> : null}
-                    {canEditMatricule ? <button className="secondary-button compact-button" type="button" disabled={Boolean(rolePendingUserId) || Boolean(regeneratingUserId) || matriculePending} onClick={() => { setMatriculeError(""); setMatriculeTarget(administrator); }}>Modifier les informations</button> : null}
-                    {!isProtected && draftRole ? <><select className="compact-role-select" aria-label={`Nouveau rôle de ${administrator.displayName}`} value={draftRole} disabled={Boolean(rolePendingUserId) || matriculePending} onChange={(event) => setDraftRoles((current) => ({ ...current, [administrator.userId]: event.target.value as ManagedRole }))}><option value="administrator">Administrateur</option><option value="maintainer">Mainteneur</option></select><button className="secondary-button compact-button" type="button" disabled={draftRole === administrator.role || Boolean(rolePendingUserId) || matriculePending} onClick={() => setRoleTarget({ administrator, role: draftRole })}>{rolePendingUserId === administrator.userId ? "Modification…" : "Changer le rôle"}</button></> : null}
+                    {administrator.role !== "owner" && administrator.status === "pending" ? <button className="secondary-button compact-button" type="button" disabled={Boolean(regeneratingUserId) || Boolean(rolePendingUserId) || matriculePending || actionPending} onClick={() => void regenerateInvitation(administrator)}>{regeneratingUserId === administrator.userId ? "Génération…" : "Régénérer le lien"}</button> : null}
+                    {canEditMatricule ? <button className="secondary-button compact-button" type="button" disabled={Boolean(rolePendingUserId) || Boolean(regeneratingUserId) || matriculePending || actionPending} onClick={() => { setMatriculeError(""); setMatriculeTarget(administrator); }}>Modifier les informations</button> : null}
+                    {!isProtected && draftRole ? <><select className="compact-role-select" aria-label={`Nouveau rôle de ${administrator.displayName}`} value={draftRole} disabled={Boolean(rolePendingUserId) || matriculePending || actionPending} onChange={(event) => setDraftRoles((current) => ({ ...current, [administrator.userId]: event.target.value as ManagedRole }))}><option value="administrator">Administrateur</option><option value="maintainer">Mainteneur</option></select><button className="secondary-button compact-button" type="button" disabled={draftRole === administrator.role || Boolean(rolePendingUserId) || matriculePending || actionPending} onClick={() => setRoleTarget({ administrator, role: draftRole })}>{rolePendingUserId === administrator.userId ? "Modification…" : "Changer le rôle"}</button></> : null}
+                    {currentUserRole === "owner" && !isProtected ? <><button className="secondary-button compact-button" type="button" disabled={actionPending || Boolean(rolePendingUserId) || matriculePending} onClick={() => setAdministratorAction({ kind: administrator.status === "blocked" ? "unblock" : "block", administrator })}>{administrator.status === "blocked" ? "Réactiver" : "Bloquer"}</button><button className="danger-button compact-button" type="button" disabled={actionPending || Boolean(rolePendingUserId) || matriculePending} onClick={() => setAdministratorAction({ kind: "delete", administrator })}>Supprimer</button></> : null}
                     {isProtected && administrator.status !== "pending" ? <span className="protected-role-label">{administrator.role === "owner" ? "Rôle protégé" : "Votre compte"}</span> : null}
                   </div></td>
                 </tr>;
@@ -282,6 +330,18 @@ export default function AdministratorsWorkspace({ initialAdministrators, current
         pending={rolePendingUserId === roleTarget.administrator.userId}
         onCancel={() => setRoleTarget(null)}
         onConfirm={() => void updateRole()}
+      /> : null}
+      {administratorAction ? <ConfirmationDialog
+        title={administratorAction.kind === "delete" ? `Supprimer ${administratorAction.administrator.displayName} ?` : administratorAction.kind === "block" ? `Bloquer ${administratorAction.administrator.displayName} ?` : `Réactiver ${administratorAction.administrator.displayName} ?`}
+        description={administratorAction.kind === "delete"
+          ? "Cette suppression est définitive : le compte Supabase, les sessions, les facteurs MFA et le profil administratif seront supprimés. La connexion deviendra impossible."
+          : administratorAction.kind === "block"
+            ? "Le compte sera bloqué immédiatement. Les sessions existantes et les nouvelles connexions seront refusées jusqu’à sa réactivation par le propriétaire."
+            : "Le compte sera réactivé. La personne devra toujours utiliser son mot de passe et son code TOTP pour accéder à l’administration."}
+        confirmLabel={administratorAction.kind === "delete" ? "Supprimer définitivement" : administratorAction.kind === "block" ? "Bloquer le compte" : "Réactiver le compte"}
+        pending={actionPending}
+        onCancel={() => setAdministratorAction(null)}
+        onConfirm={() => void applyAdministratorAction()}
       /> : null}
       {matriculeTarget ? <MatriculeEditDialog
         kind="administrator"
